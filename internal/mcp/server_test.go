@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
 	"github.com/raychao-oao/cred-mcp/internal/index"
@@ -264,7 +265,15 @@ func TestSessionGate_PingBypassesExpiredSession(t *testing.T) {
 
 func TestSessionGate_StashToolsDeniedWhenExpired(t *testing.T) {
 	setupHandlerTest(t)
-	// Force expiry before the call.
+	// Swap in a session whose unlock policy denies — Lock() alone no longer
+	// guarantees denial because Touch() will attempt re-unlock. Together,
+	// Lock + denying policy = the "session is expired AND user declined to
+	// re-authenticate" path that callers must handle.
+	prev := session.Default
+	session.Default = session.New(30*time.Minute, 8*time.Hour, func() error {
+		return errors.New("denied for test")
+	})
+	t.Cleanup(func() { session.Default = prev })
 	session.Default.Lock()
 
 	for _, name := range []string{"copy_stash", "save_stash", "delete_stash"} {

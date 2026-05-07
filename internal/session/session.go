@@ -7,11 +7,10 @@
 //	                activity) and the absolute TTL (default 8 hr since
 //	                unlock). Touch refreshes activity and stays Active.
 //	StateExpired  — either TTL exceeded, or Lock() was called explicitly.
-//	                Refuses all Touch calls. Recovery in v1 requires
-//	                restarting the cred-mcp process. feat/biometric will
-//	                later replace the unlock policy with a Touch ID /
-//	                Windows Hello challenge so re-unlock becomes possible
-//	                in-process.
+//	                Touch attempts the unlock policy again; on success the
+//	                session returns to Active with fresh timers. With a
+//	                real biometric policy this becomes a Touch ID / passcode
+//	                re-prompt; with AutoUnlock it silently re-grants.
 //
 // Sessions live per-process. Each cred-mcp instance has its own state;
 // nothing is persisted across restarts.
@@ -57,12 +56,17 @@ func (s State) String() string {
 	}
 }
 
-// UnlockPolicy decides whether unlock is granted on the StateNew → Active
-// transition. v1 ships with AutoUnlock (no challenge). feat/biometric
-// will swap in a policy that prompts Touch ID / Windows Hello.
+// UnlockPolicy proves user identity at session unlock time (both StateNew →
+// Active and StateExpired → Active). The signature is intentionally bare —
+// a single yes/no — so backends never see the auth and so additional auth
+// mechanisms (hardware token, WebAuthn) plug in without ceremony.
+//
+// Implementations live in internal/biometric (Touch ID / Windows Hello /
+// future siblings). Tests wire injected policies via New.
 type UnlockPolicy func() error
 
-// AutoUnlock grants unlock without prompting. Used as the v1 default.
+// AutoUnlock grants unlock without prompting. Used in tests and as a
+// fallback on platforms without a real biometric implementation yet.
 func AutoUnlock() error { return nil }
 
 // Session holds per-process authorization state.
@@ -96,37 +100,51 @@ func New(idleTTL, absoluteTTL time.Duration, unlock UnlockPolicy) *Session {
 var Default = New(DefaultIdleTTL, DefaultAbsoluteTTL, AutoUnlock)
 
 // Touch authorizes a tool call. On nil error the caller may proceed.
-// On non-nil error the session is (or just became) Expired and the
-// caller must surface that to the user — process restart is required
-// to recover.
+// On non-nil error the call is denied; the caller surfaces the message
+// to the user (e.g. "biometric authentication required, please retry").
+//
+// State transitions:
+//
+//	New      → unlock policy → Active     (or stay New on policy failure)
+//	Active   → TTL within budget          → Active (refresh idle timer)
+//	Active   → TTL exceeded               → Expired, then immediately
+//	                                        attempt unlock as if from
+//	                                        Expired (single Touch can
+//	                                        recover transparently when
+//	                                        the user authenticates)
+//	Expired  → unlock policy → Active     (or stay Expired on failure)
 func (s *Session) Touch() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
 
-	switch s.state {
-	case StateExpired:
-		return fmt.Errorf("%w: requires cred-mcp restart", ErrExpired)
+	if s.state == StateActive {
+		if since := now.Sub(s.unlockedAt); since > s.absoluteTTL {
+			s.state = StateExpired
+		} else if since := now.Sub(s.lastActivity); since > s.idleTTL {
+			s.state = StateExpired
+		} else {
+			s.lastActivity = now
+			return nil
+		}
+	}
 
-	case StateNew:
+	switch s.state {
+	case StateNew, StateExpired:
+		wasExpired := s.state == StateExpired
 		if err := s.unlock(); err != nil {
+			if wasExpired {
+				// Surface ErrExpired so callers can distinguish "session was
+				// expired and the user declined to re-authenticate" from
+				// "first call could not unlock". Same wire format error,
+				// different chain.
+				return fmt.Errorf("%w; re-unlock denied: %w", ErrExpired, err)
+			}
 			return fmt.Errorf("session unlock failed: %w", err)
 		}
 		s.state = StateActive
 		s.unlockedAt = now
-		s.lastActivity = now
-		return nil
-
-	case StateActive:
-		if since := now.Sub(s.unlockedAt); since > s.absoluteTTL {
-			s.state = StateExpired
-			return fmt.Errorf("%w: absolute TTL exceeded (%s); requires cred-mcp restart", ErrExpired, since.Round(time.Second))
-		}
-		if since := now.Sub(s.lastActivity); since > s.idleTTL {
-			s.state = StateExpired
-			return fmt.Errorf("%w: idle TTL exceeded (%s); requires cred-mcp restart", ErrExpired, since.Round(time.Second))
-		}
 		s.lastActivity = now
 		return nil
 	}
