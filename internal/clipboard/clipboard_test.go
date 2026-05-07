@@ -114,6 +114,18 @@ func TestRejectsNonPositiveTTL(t *testing.T) {
 	}
 }
 
+func TestRead(t *testing.T) {
+	b := withFake(t, "clipboard-content")
+	got, err := Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got != "clipboard-content" {
+		t.Fatalf("Read = %q, want %q", got, "clipboard-content")
+	}
+	_ = b
+}
+
 func TestPriorReadErrorIsTolerated(t *testing.T) {
 	// Some Linux setups return errors on empty clipboard; SetWithAutoClear
 	// must not abort the write because of that.

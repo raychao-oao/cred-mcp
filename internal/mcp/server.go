@@ -59,8 +59,7 @@ var toolsList = []map[string]any{
 		"description": "Copy a stored secret to the user's clipboard for a limited time. " +
 			"The secret value never enters the conversation; only metadata (name, ttl) is returned. " +
 			"After the TTL expires the clipboard is restored to its prior contents " +
-			"(unless the user has pasted-and-replaced it in the meantime). " +
-			"Stored entries are managed out-of-band via 'cred-mcp dev keychain' for now.",
+			"(unless the user has pasted-and-replaced it in the meantime).",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -73,6 +72,38 @@ var toolsList = []map[string]any{
 					"description": fmt.Sprintf("Seconds before the clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
 					"minimum":     1,
 					"maximum":     maxCopyTTLSeconds,
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		"name": "save_stash",
+		"description": "Store the secret currently on the user's clipboard under the given name. " +
+			"The secret value never enters the conversation: it is read directly from the clipboard, " +
+			"written to the OS keychain, and the clipboard is then cleared. " +
+			"Use this when the user has just copied a password/token they want stashed for later retrieval. " +
+			"Overwrites any existing entry with the same name.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Identifier to store the secret under (no colons, must not be empty).",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		"name": "delete_stash",
+		"description": "Delete a stored secret by name. Returns an error if no entry exists with that name.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Identifier of the stored secret to delete (no colons).",
 				},
 			},
 			"required": []string{"name"},
@@ -146,6 +177,10 @@ func handleToolCall(req *request, version string) response {
 		})
 	case "copy_stash":
 		return handleCopyStash(req.ID, p.Arguments)
+	case "save_stash":
+		return handleSaveStash(req.ID, p.Arguments)
+	case "delete_stash":
+		return handleDeleteStash(req.ID, p.Arguments)
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}
@@ -220,5 +255,72 @@ func handleCopyStash(id any, raw json.RawMessage) response {
 		"ttl_seconds": ttlSeconds,
 		"status":      "copied",
 		"note":        "Secret is on the clipboard. It will be restored to the prior value after the TTL unless the user pastes-and-replaces it.",
+	})
+}
+
+type saveStashArgs struct {
+	Name string `json:"name"`
+}
+
+func handleSaveStash(id any, raw json.RawMessage) response {
+	var args saveStashArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if args.Name == "" {
+		return toolErrResp(id, "name is required")
+	}
+
+	value, err := clipboard.Read()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
+	}
+	if value == "" {
+		return toolErrResp(id, "clipboard is empty; ask the user to copy the secret first")
+	}
+
+	if err := keychain.Set(args.Name, value); err != nil {
+		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
+	}
+
+	// Clear the clipboard so the plaintext does not linger after stashing.
+	if err := clipboard.Clear(); err != nil {
+		log.Printf("save_stash: clipboard clear failed: %v", err)
+	}
+
+	return okResp(id, map[string]any{
+		"name":   args.Name,
+		"status": "stored",
+		"note":   "Secret stored. Clipboard cleared.",
+	})
+}
+
+type deleteStashArgs struct {
+	Name string `json:"name"`
+}
+
+func handleDeleteStash(id any, raw json.RawMessage) response {
+	var args deleteStashArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if args.Name == "" {
+		return toolErrResp(id, "name is required")
+	}
+
+	if err := keychain.Delete(args.Name); err != nil {
+		if errors.Is(err, keychain.ErrNotFound) {
+			return toolErrResp(id, fmt.Sprintf("no stored secret named %q", args.Name))
+		}
+		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
+	}
+
+	return okResp(id, map[string]any{
+		"name":   args.Name,
+		"status": "deleted",
 	})
 }
