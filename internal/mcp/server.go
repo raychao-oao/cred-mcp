@@ -80,8 +80,9 @@ var toolsList = []map[string]any{
 	{
 		"name": "save_stash",
 		"description": "Store the secret currently on the user's clipboard under the given name. " +
-			"The secret value never enters the conversation: it is read directly from the clipboard, " +
-			"written to the OS keychain, and the clipboard is then cleared. " +
+			"The secret value never enters the conversation: it is read directly from the clipboard " +
+			"and written to the OS keychain. " +
+			"The user's clipboard is left untouched after a successful stash — managing it (paste, replace, etc.) is up to the user. " +
 			"Use this when the user has just copied a password/token they want stashed for later retrieval. " +
 			"Overwrites any existing entry with the same name.",
 		"inputSchema": map[string]any{
@@ -282,39 +283,19 @@ func handleSaveStash(id any, raw json.RawMessage) response {
 	}
 
 	if err := keychain.Set(args.Name, value); err != nil {
-		// Set failed; do NOT touch the clipboard — the secret stays where
-		// the user put it so they can retry without re-copying.
 		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
 	}
 
-	// Compare-before-clear: only clear the clipboard if it still contains
-	// the value we just stashed. If the user (or another process) replaced
-	// it during the stash, leave them alone — same policy as copy_stash's
-	// auto-clear restore step.
-	current, readErr := clipboard.Read()
-	if readErr != nil {
-		log.Printf("save_stash: re-read failed for %q: %v", args.Name, readErr)
-		return toolErrResp(id, fmt.Sprintf("secret stored under %q but clipboard state could not be verified for cleanup; ask the user to clear the clipboard manually", args.Name))
-	}
-	if current != value {
-		return okResp(id, map[string]any{
-			"name":   args.Name,
-			"status": "stored",
-			"note":   "Secret stored. Clipboard was modified during stash and was left alone.",
-		})
-	}
-	if err := clipboard.Clear(); err != nil {
-		log.Printf("save_stash: clipboard clear failed for %q: %v", args.Name, err)
-		// The secret is stored but plaintext is still on the clipboard —
-		// surface as a tool error so the AI can warn the user, instead of
-		// claiming cleanup succeeded.
-		return toolErrResp(id, fmt.Sprintf("secret stored under %q but clipboard cleanup failed; ask the user to clear the clipboard manually", args.Name))
-	}
-
+	// The clipboard is intentionally left alone. The user put the secret
+	// there knowingly; trying to clear it racily on every OS pasteboard
+	// produces TOCTOU bugs and offers little real protection (clipboard
+	// managers keep history anyway). Lifetime of AI access to the stored
+	// secret is governed by session expiry (planned in feat/session),
+	// not by clipboard manipulation here.
 	return okResp(id, map[string]any{
 		"name":   args.Name,
 		"status": "stored",
-		"note":   "Secret stored. Clipboard cleared.",
+		"note":   "Secret stored. Clipboard left alone — manage it yourself.",
 	})
 }
 
