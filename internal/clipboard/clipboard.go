@@ -128,4 +128,17 @@ func Clear() error {
 	return nil
 }
 
+// Read returns the current clipboard contents. Used by save_stash to ingest
+// a secret the user just copied without ever passing it through LLM context.
+func Read() (string, error) {
+	if clipboard.Unsupported {
+		return "", ErrUnsupported
+	}
+	v, err := readFunc()
+	if err != nil {
+		return "", fmt.Errorf("clipboard: read: %w", err)
+	}
+	return v, nil
+}
+
 var _ = nowFunc // reserved for future timing-dependent helpers
