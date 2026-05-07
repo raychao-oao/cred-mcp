@@ -28,6 +28,13 @@ config.local.*
 # Logs
 *.log
 
+# Private AI working content lives in the workspace layer (one directory up),
+# never in this public repo. These ignores defend against a misplaced /init
+# or a stray ai_helpers.sh log writing here.
+CLAUDE.md
+CLAUDE.local.md
+docs/ai_collaboration/
+
 # Plugin assets that should be tracked are under plugin/
 !plugin/
 !plugin/**
