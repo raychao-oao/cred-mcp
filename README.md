@@ -29,8 +29,19 @@ You paste into the SSH prompt; clipboard auto-restores after the TTL.
 | `save_stash` | Read user's clipboard, store under `name` in OS keychain. Clipboard is left untouched after — manage it as your normal workflow. |
 | `copy_stash` | Read stored secret by `name`, put on clipboard for `ttl_seconds` (default 30, max 600). Auto-restores prior clipboard contents after the TTL unless the user has paste-and-replaced it. |
 | `delete_stash` | Remove a stored secret by `name`. |
+| `list_stash` | List metadata for all stored secrets (`name`, `source`, `created_at`). Values are never returned. Useful for migration: see what has already been moved into safe storage. |
 
-All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`). The value is never serialized into the response or stderr logs.
+All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`, `source`, `created_at`). The value is never serialized into the response or stderr logs.
+
+`list_stash` is backed by an index file at the OS user config directory:
+
+```
+macOS:    ~/Library/Application Support/cred-mcp/index.json
+Linux:    $XDG_CONFIG_HOME/cred-mcp/index.json (or ~/.config/...)
+Windows:  %AppData%\cred-mcp\index.json
+```
+
+The index stores names only (no values). It is `chmod 0600`. You can inspect it with `cat`; you can also delete it to start fresh, with the only loss being the names you already had — the keychain entries themselves are unaffected.
 
 ## Build & install
 

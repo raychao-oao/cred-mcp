@@ -3,11 +3,13 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
+	"github.com/raychao-oao/cred-mcp/internal/index"
 	"github.com/raychao-oao/cred-mcp/internal/session"
 	"github.com/zalando/go-keyring"
 )
@@ -58,18 +60,23 @@ func (f *fakeClipboard) snapshot() string {
 	return f.value
 }
 
-// setupHandlerTest installs a fresh in-memory keychain and clipboard fake,
-// and resets the process-wide session so each test starts fresh.
-// Cleanup is registered via t.Cleanup.
+// setupHandlerTest installs a fresh in-memory keychain, clipboard fake,
+// per-test index file, and resets the process-wide session. Cleanup is
+// registered via t.Cleanup.
 func setupHandlerTest(t *testing.T) *fakeClipboard {
 	t.Helper()
 	keyring.MockInit()
 	fake := &fakeClipboard{}
 	restore := clipboard.ReplaceSeamsForTesting(fake.read, fake.write)
 	session.Default.ResetForTesting()
+
+	prevIndex := defaultIndex
+	defaultIndex = index.New(filepath.Join(t.TempDir(), "index.json"))
+
 	t.Cleanup(func() {
 		restore()
 		session.Default.ResetForTesting()
+		defaultIndex = prevIndex
 	})
 	return fake
 }
@@ -293,5 +300,105 @@ func TestSessionGate_StashToolsAllowedWhenActive(t *testing.T) {
 	resp = callTool(t, "delete_stash", map[string]any{"name": "alpha"})
 	if isErr, text, _ := extract(t, resp); isErr {
 		t.Fatalf("delete_stash on active session should succeed; got error: %s", text)
+	}
+}
+
+// ---------- list_stash + index integration ----------
+
+func TestListStash_EmptyOnFreshIndex(t *testing.T) {
+	setupHandlerTest(t)
+	resp := callTool(t, "list_stash", map[string]any{})
+	isErr, text, parsed := extract(t, resp)
+	if isErr {
+		t.Fatalf("list_stash on fresh index should succeed; got error: %s", text)
+	}
+	if got, _ := parsed["count"].(float64); got != 0 {
+		t.Fatalf("count = %v, want 0", parsed["count"])
+	}
+	entries, _ := parsed["entries"].([]any)
+	if len(entries) != 0 {
+		t.Fatalf("entries should be empty, got %+v", entries)
+	}
+}
+
+func TestSaveStash_RecordsInIndex(t *testing.T) {
+	fake := setupHandlerTest(t)
+	fake.value = "v"
+	if isErr, text, _ := extract(t, callTool(t, "save_stash", map[string]any{"name": "alpha"})); isErr {
+		t.Fatalf("save_stash alpha: %s", text)
+	}
+	fake.value = "v"
+	if isErr, text, _ := extract(t, callTool(t, "save_stash", map[string]any{"name": "beta"})); isErr {
+		t.Fatalf("save_stash beta: %s", text)
+	}
+
+	resp := callTool(t, "list_stash", map[string]any{})
+	isErr, text, parsed := extract(t, resp)
+	if isErr {
+		t.Fatalf("list_stash: %s", text)
+	}
+	if got, _ := parsed["count"].(float64); got != 2 {
+		t.Fatalf("count = %v, want 2", parsed["count"])
+	}
+	entries, _ := parsed["entries"].([]any)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		em, _ := e.(map[string]any)
+		names = append(names, em["name"].(string))
+		if em["source"] != "keychain" {
+			t.Errorf("source = %v, want keychain", em["source"])
+		}
+		if _, ok := em["created_at"].(string); !ok {
+			t.Errorf("created_at missing/non-string: %v", em["created_at"])
+		}
+	}
+	if names[0] != "alpha" || names[1] != "beta" {
+		t.Fatalf("names = %v, want [alpha beta]", names)
+	}
+}
+
+func TestDeleteStash_RemovesFromIndex(t *testing.T) {
+	fake := setupHandlerTest(t)
+	fake.value = "v"
+	if isErr, text, _ := extract(t, callTool(t, "save_stash", map[string]any{"name": "alpha"})); isErr {
+		t.Fatalf("save_stash: %s", text)
+	}
+	if isErr, text, _ := extract(t, callTool(t, "delete_stash", map[string]any{"name": "alpha"})); isErr {
+		t.Fatalf("delete_stash: %s", text)
+	}
+
+	resp := callTool(t, "list_stash", map[string]any{})
+	_, _, parsed := extract(t, resp)
+	if got, _ := parsed["count"].(float64); got != 0 {
+		t.Fatalf("count after delete = %v, want 0", parsed["count"])
+	}
+}
+
+// Even if the keychain entry is missing, delete_stash should still sweep
+// the index — handles the case where the user wiped the keychain entry
+// out-of-band and now wants to clean up the leftover name.
+func TestDeleteStash_NotFound_StillSweepsIndex(t *testing.T) {
+	setupHandlerTest(t)
+	// Seed index with a name that has no keychain backing.
+	if err := defaultIndex.Add("phantom", index.SourceKeychain); err != nil {
+		t.Fatalf("seed index: %v", err)
+	}
+
+	resp := callTool(t, "delete_stash", map[string]any{"name": "phantom"})
+	isErr, text, _ := extract(t, resp)
+	if !isErr {
+		t.Fatalf("expected not-found tool error; got success text=%q", text)
+	}
+	if !strings.Contains(text, "no stored secret") {
+		t.Fatalf("error should mention not-found; got %q", text)
+	}
+
+	// Index should now be empty — the phantom got swept.
+	got, err := defaultIndex.List()
+	if err != nil {
+		t.Fatalf("index List: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("phantom should have been swept; got %+v", got)
 	}
 }
