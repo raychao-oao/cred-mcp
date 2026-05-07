@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
+	"github.com/raychao-oao/cred-mcp/internal/index"
 	"github.com/raychao-oao/cred-mcp/internal/keychain"
 	"github.com/raychao-oao/cred-mcp/internal/session"
 )
@@ -45,6 +46,21 @@ const (
 	defaultCopyTTLSeconds = 30
 	maxCopyTTLSeconds     = 600
 )
+
+// defaultIndex is set by Serve and used by the stash handlers. Tests in
+// the same package may override it directly.
+var defaultIndex *index.Index
+
+func ensureDefaultIndex() {
+	if defaultIndex != nil {
+		return
+	}
+	idx, err := index.Default()
+	if err != nil {
+		log.Fatalf("cred-mcp: cannot initialize index: %v", err)
+	}
+	defaultIndex = idx
+}
 
 var toolsList = []map[string]any{
 	{
@@ -111,10 +127,22 @@ var toolsList = []map[string]any{
 			"required": []string{"name"},
 		},
 	},
+	{
+		"name": "list_stash",
+		"description": "List the names of all stored secrets known to cred-mcp. " +
+			"Returns only metadata (name, source, created_at) — never the values. " +
+			"Sorted by source then name. Useful during migration to see what has already been moved into safe storage.",
+		"inputSchema": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	},
 }
 
 // Serve runs the JSON-RPC stdio loop. version is reported via initialize.
 func Serve(version string) {
+	ensureDefaultIndex()
+
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)
 	encoder := json.NewEncoder(os.Stdout)
@@ -194,6 +222,8 @@ func handleToolCall(req *request, version string) response {
 		return handleSaveStash(req.ID, p.Arguments)
 	case "delete_stash":
 		return handleDeleteStash(req.ID, p.Arguments)
+	case "list_stash":
+		return handleListStash(req.ID, p.Arguments)
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}
@@ -298,12 +328,19 @@ func handleSaveStash(id any, raw json.RawMessage) response {
 		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
 	}
 
+	// Track the name in the index. Failure here is logged but does not
+	// fail save_stash — the secret is genuinely stored and that is what
+	// the AI should know. Index drift can be repaired by re-running
+	// save_stash (Add is idempotent) or via list_stash inspection.
+	if err := defaultIndex.Add(args.Name, index.SourceKeychain); err != nil {
+		log.Printf("save_stash: index Add failed for %q (re-run to repair tracking): %v", args.Name, err)
+	}
+
 	// The clipboard is intentionally left alone. The user put the secret
 	// there knowingly; trying to clear it racily on every OS pasteboard
 	// produces TOCTOU bugs and offers little real protection (clipboard
 	// managers keep history anyway). Lifetime of AI access to the stored
-	// secret is governed by session expiry (planned in feat/session),
-	// not by clipboard manipulation here.
+	// secret is governed by session expiry, not by clipboard manipulation.
 	return okResp(id, map[string]any{
 		"name":   args.Name,
 		"status": "stored",
@@ -328,13 +365,43 @@ func handleDeleteStash(id any, raw json.RawMessage) response {
 
 	if err := keychain.Delete(args.Name); err != nil {
 		if errors.Is(err, keychain.ErrNotFound) {
+			// Even when the keychain entry is missing, sweep the index in
+			// case it is the side that is stale. Idempotent.
+			if rmErr := defaultIndex.Remove(args.Name, index.SourceKeychain); rmErr != nil {
+				log.Printf("delete_stash: index Remove failed for %q: %v", args.Name, rmErr)
+			}
 			return toolErrResp(id, fmt.Sprintf("no stored secret named %q", args.Name))
 		}
 		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
 	}
 
+	if err := defaultIndex.Remove(args.Name, index.SourceKeychain); err != nil {
+		log.Printf("delete_stash: index Remove failed for %q: %v", args.Name, err)
+	}
+
 	return okResp(id, map[string]any{
 		"name":   args.Name,
 		"status": "deleted",
+	})
+}
+
+func handleListStash(id any, _ json.RawMessage) response {
+	entries, err := defaultIndex.List()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("index error: %v", err))
+	}
+
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"name":       e.Name,
+			"source":     string(e.Source),
+			"created_at": e.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+
+	return okResp(id, map[string]any{
+		"count":   len(entries),
+		"entries": out,
 	})
 }
