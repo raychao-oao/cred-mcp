@@ -2,12 +2,17 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"time"
+
+	"github.com/raychao-oao/cred-mcp/internal/clipboard"
+	"github.com/raychao-oao/cred-mcp/internal/keychain"
 )
 
 type request struct {
@@ -34,6 +39,12 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// Default and ceiling values for copy_stash auto-clear TTL.
+const (
+	defaultCopyTTLSeconds = 30
+	maxCopyTTLSeconds     = 600
+)
+
 var toolsList = []map[string]any{
 	{
 		"name":        "ping",
@@ -41,6 +52,30 @@ var toolsList = []map[string]any{
 		"inputSchema": map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
+		},
+	},
+	{
+		"name": "copy_stash",
+		"description": "Copy a stored secret to the user's clipboard for a limited time. " +
+			"The secret value never enters the conversation; only metadata (name, ttl) is returned. " +
+			"After the TTL expires the clipboard is restored to its prior contents " +
+			"(unless the user has pasted-and-replaced it in the meantime). " +
+			"Stored entries are managed out-of-band via 'cred-mcp dev keychain' for now.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Identifier of the stored secret (no colons).",
+				},
+				"ttl_seconds": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("Seconds before the clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
+					"minimum":     1,
+					"maximum":     maxCopyTTLSeconds,
+				},
+			},
+			"required": []string{"name"},
 		},
 	},
 }
@@ -109,6 +144,8 @@ func handleToolCall(req *request, version string) response {
 			"version": version,
 			"time":    time.Now().UTC().Format(time.RFC3339),
 		})
+	case "copy_stash":
+		return handleCopyStash(req.ID, p.Arguments)
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}
@@ -121,6 +158,67 @@ func okResp(id any, result any) response {
 	}}
 }
 
+// toolErrResp returns a tool-call response with isError=true so MCP clients
+// can surface the failure without treating it as a JSON-RPC protocol error.
+func toolErrResp(id any, msg string) response {
+	return response{JSONRPC: "2.0", ID: id, Result: map[string]any{
+		"content": []map[string]any{{"type": "text", "text": msg}},
+		"isError": true,
+	}}
+}
+
 func errResp(id any, code int, msg string) response {
 	return response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}}
+}
+
+type copyStashArgs struct {
+	Name       string `json:"name"`
+	TTLSeconds int    `json:"ttl_seconds"`
+}
+
+func handleCopyStash(id any, raw json.RawMessage) response {
+	var args copyStashArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if args.Name == "" {
+		return toolErrResp(id, "name is required")
+	}
+	ttlSeconds := args.TTLSeconds
+	if ttlSeconds <= 0 {
+		ttlSeconds = defaultCopyTTLSeconds
+	}
+	if ttlSeconds > maxCopyTTLSeconds {
+		ttlSeconds = maxCopyTTLSeconds
+	}
+
+	value, err := keychain.Get(args.Name)
+	if err != nil {
+		if errors.Is(err, keychain.ErrNotFound) {
+			return toolErrResp(id, fmt.Sprintf("no stored secret named %q", args.Name))
+		}
+		return toolErrResp(id, fmt.Sprintf("keychain error: %v", err))
+	}
+
+	ttl := time.Duration(ttlSeconds) * time.Second
+	wait, err := clipboard.SetWithAutoClear(context.Background(), value, ttl)
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
+	}
+
+	// Auto-clear runs in the background; the tool call returns immediately.
+	go func() {
+		result := wait()
+		log.Printf("copy_stash name=%q ttl=%s result=%s", args.Name, ttl, result)
+	}()
+
+	// Deliberately omit the secret value from the response.
+	return okResp(id, map[string]any{
+		"name":        args.Name,
+		"ttl_seconds": ttlSeconds,
+		"status":      "copied",
+		"note":        "Secret is on the clipboard. It will be restored to the prior value after the TTL unless the user pastes-and-replaces it.",
+	})
 }
