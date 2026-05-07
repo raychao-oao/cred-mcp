@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and release
+    # macos-latest is required for darwin builds because the binary uses
+    # cgo + LocalAuthentication (Touch ID). Linux / Windows builds in this
+    # same job use CGO_ENABLED=0 so they compile against the !darwin stub
+    # without needing a Linux runner.
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build darwin-arm64 (native, cgo + LocalAuthentication)
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build -ldflags "${LDFLAGS}" -o cred-mcp-darwin-arm64 .
+
+      - name: Build linux / windows (CGO_ENABLED=0, biometric stub)
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 \
+            go build -ldflags "${LDFLAGS}" -o cred-mcp-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 \
+            go build -ldflags "${LDFLAGS}" -o cred-mcp-linux-arm64 .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -ldflags "${LDFLAGS}" -o cred-mcp-windows-amd64.exe .
+
+      - name: Generate checksums
+        run: shasum -a 256 cred-mcp-* > SHA256SUMS
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The release body is taken from the annotated tag's message by
+          # default. Push tags with `git tag -a vX.Y.Z -m "..."` for nice
+          # release notes.
+          files: |
+            cred-mcp-darwin-arm64
+            cred-mcp-linux-amd64
+            cred-mcp-linux-arm64
+            cred-mcp-windows-amd64.exe
+            SHA256SUMS
