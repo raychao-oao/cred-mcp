@@ -142,3 +142,22 @@ func Read() (string, error) {
 }
 
 var _ = nowFunc // reserved for future timing-dependent helpers
+
+// ReplaceSeamsForTesting swaps the package-internal clipboard read/write
+// hooks with the supplied callbacks and returns a function that restores
+// the originals. Intended only for tests in other packages that exercise
+// code paths depending on clipboard behavior. Production code must not
+// call this.
+func ReplaceSeamsForTesting(read func() (string, error), write func(string) error) (restore func()) {
+	prevRead, prevWrite := readFunc, writeFunc
+	if read != nil {
+		readFunc = read
+	}
+	if write != nil {
+		writeFunc = write
+	}
+	return func() {
+		readFunc = prevRead
+		writeFunc = prevWrite
+	}
+}
