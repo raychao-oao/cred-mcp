@@ -153,7 +153,7 @@ func TestSaveStash_KeychainSetFailureLeavesClipboard(t *testing.T) {
 	}
 }
 
-func TestSaveStash_HappyPathClearsClipboard(t *testing.T) {
+func TestSaveStash_HappyPathLeavesClipboard(t *testing.T) {
 	fake := setupHandlerTest(t)
 	fake.value = "secret-value"
 	resp := handleSaveStash("id1", mustMarshal(t, map[string]any{"name": "foo"}))
@@ -164,99 +164,15 @@ func TestSaveStash_HappyPathClearsClipboard(t *testing.T) {
 	if parsed["status"] != "stored" {
 		t.Fatalf("status = %v, want stored", parsed["status"])
 	}
-	if !strings.Contains(parsed["note"].(string), "Clipboard cleared") {
-		t.Fatalf("note should mention cleared, got %q", parsed["note"])
+	if got := fake.snapshot(); got != "secret-value" {
+		t.Fatalf("clipboard should be untouched, got %q", got)
 	}
-	if got := fake.snapshot(); got != "" {
-		t.Fatalf("clipboard should be cleared, got %q", got)
+	if len(fake.writes) != 0 {
+		t.Fatalf("no clipboard writes expected, got %d: %v", len(fake.writes), fake.writes)
 	}
 	got, err := keyring.Get("cred-mcp", "foo")
 	if err != nil || got != "secret-value" {
 		t.Fatalf("keychain.Get foo = %q,%v; want secret-value", got, err)
-	}
-}
-
-// Race fix: clipboard changed between initial Read and re-read. Handler must
-// NOT clear the user's new content.
-func TestSaveStash_UserModifiedMidStash(t *testing.T) {
-	fake := setupHandlerTest(t)
-	fake.value = "secret-value"
-	// Override read so that the second call returns user-pasted content.
-	fake.readHook = func(call int) (string, error, bool) {
-		if call == 2 {
-			return "user-pasted-after-stash", nil, true
-		}
-		return "", nil, false
-	}
-
-	resp := handleSaveStash("id1", mustMarshal(t, map[string]any{"name": "foo"}))
-	isErr, text, parsed := extract(t, resp)
-	if isErr {
-		t.Fatalf("unexpected error: %s", text)
-	}
-	if parsed["status"] != "stored" {
-		t.Fatalf("status = %v, want stored", parsed["status"])
-	}
-	note := parsed["note"].(string)
-	if !strings.Contains(note, "left alone") {
-		t.Fatalf("note should mention clipboard left alone, got %q", note)
-	}
-	// No clipboard writes should have happened.
-	if len(fake.writes) != 0 {
-		t.Fatalf("no clipboard writes expected, got %d: %v", len(fake.writes), fake.writes)
-	}
-	// keychain still has the value.
-	if got, _ := keyring.Get("cred-mcp", "foo"); got != "secret-value" {
-		t.Fatalf("keychain.Get foo = %q, want secret-value", got)
-	}
-}
-
-func TestSaveStash_ReReadFailureSurfacesError(t *testing.T) {
-	fake := setupHandlerTest(t)
-	fake.value = "secret-value"
-	// Second read fails.
-	fake.readHook = func(call int) (string, error, bool) {
-		if call == 2 {
-			return "", errors.New("simulated re-read failure"), true
-		}
-		return "", nil, false
-	}
-
-	resp := handleSaveStash("id1", mustMarshal(t, map[string]any{"name": "foo"}))
-	isErr, text, _ := extract(t, resp)
-	if !isErr {
-		t.Fatalf("want tool error, got success: %s", text)
-	}
-	if !strings.Contains(text, "could not be verified") {
-		t.Fatalf("error should mention verification, got %q", text)
-	}
-	// keychain still has the value.
-	if got, _ := keyring.Get("cred-mcp", "foo"); got != "secret-value" {
-		t.Fatalf("keychain.Get foo = %q, want secret-value", got)
-	}
-	// Clipboard untouched.
-	if got := fake.snapshot(); got != "secret-value" {
-		t.Fatalf("clipboard should be untouched, got %q", got)
-	}
-}
-
-func TestSaveStash_ClearFailureSurfacesError(t *testing.T) {
-	fake := setupHandlerTest(t)
-	fake.value = "secret-value"
-	fake.writeErr = errors.New("simulated clear failure")
-
-	resp := handleSaveStash("id1", mustMarshal(t, map[string]any{"name": "foo"}))
-	isErr, text, _ := extract(t, resp)
-	if !isErr {
-		t.Fatalf("want tool error, got success text=%q", text)
-	}
-	if !strings.Contains(text, "cleanup failed") {
-		t.Fatalf("error should mention cleanup failure, got %q", text)
-	}
-	// keychain still has the value (the lie that codex flagged is gone:
-	// the AI now knows cleanup failed, and the secret really is stored).
-	if got, _ := keyring.Get("cred-mcp", "foo"); got != "secret-value" {
-		t.Fatalf("keychain.Get foo = %q, want secret-value", got)
 	}
 }
 
