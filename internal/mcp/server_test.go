@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
+	"github.com/raychao-oao/cred-mcp/internal/session"
 	"github.com/zalando/go-keyring"
 )
 
@@ -57,14 +58,19 @@ func (f *fakeClipboard) snapshot() string {
 	return f.value
 }
 
-// setupHandlerTest installs a fresh in-memory keychain and clipboard fake.
-// The cleanup is registered via t.Cleanup.
+// setupHandlerTest installs a fresh in-memory keychain and clipboard fake,
+// and resets the process-wide session so each test starts fresh.
+// Cleanup is registered via t.Cleanup.
 func setupHandlerTest(t *testing.T) *fakeClipboard {
 	t.Helper()
 	keyring.MockInit()
 	fake := &fakeClipboard{}
 	restore := clipboard.ReplaceSeamsForTesting(fake.read, fake.write)
-	t.Cleanup(restore)
+	session.Default.ResetForTesting()
+	t.Cleanup(func() {
+		restore()
+		session.Default.ResetForTesting()
+	})
 	return fake
 }
 
@@ -211,5 +217,81 @@ func TestDeleteStash_HappyPath(t *testing.T) {
 	}
 	if _, err := keyring.Get("cred-mcp", "foo"); !errors.Is(err, keyring.ErrNotFound) {
 		t.Fatalf("expected entry gone, got err=%v", err)
+	}
+}
+
+// ---------- session gate (dispatch level) ----------
+
+// callTool dispatches a tools/call request through the same chokepoint
+// that runs in production, exercising the session gate.
+func callTool(t *testing.T, name string, args map[string]any) response {
+	t.Helper()
+	params, err := json.Marshal(toolCallParams{
+		Name:      name,
+		Arguments: mustMarshal(t, args),
+	})
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	req := &request{
+		JSONRPC: "2.0",
+		ID:      "test",
+		Method:  "tools/call",
+		Params:  json.RawMessage(params),
+	}
+	return handleToolCall(req, "test")
+}
+
+func TestSessionGate_PingBypassesExpiredSession(t *testing.T) {
+	setupHandlerTest(t)
+	session.Default.Lock()
+	resp := callTool(t, "ping", map[string]any{})
+	isErr, text, parsed := extract(t, resp)
+	if isErr {
+		t.Fatalf("ping should succeed even when session locked; got error: %s", text)
+	}
+	if ok, _ := parsed["ok"].(bool); !ok {
+		t.Fatalf("ping result missing ok=true: %+v", parsed)
+	}
+}
+
+func TestSessionGate_StashToolsDeniedWhenExpired(t *testing.T) {
+	setupHandlerTest(t)
+	// Force expiry before the call.
+	session.Default.Lock()
+
+	for _, name := range []string{"copy_stash", "save_stash", "delete_stash"} {
+		t.Run(name, func(t *testing.T) {
+			resp := callTool(t, name, map[string]any{"name": "anything"})
+			isErr, text, _ := extract(t, resp)
+			if !isErr {
+				t.Fatalf("expected tool error when session expired; got success text=%q", text)
+			}
+			if !strings.Contains(text, "session expired") {
+				t.Fatalf("error should mention session expired; got %q", text)
+			}
+		})
+	}
+}
+
+func TestSessionGate_StashToolsAllowedWhenActive(t *testing.T) {
+	fake := setupHandlerTest(t)
+	fake.value = "secret-value"
+
+	// First save_stash should auto-unlock the session.
+	resp := callTool(t, "save_stash", map[string]any{"name": "alpha"})
+	if isErr, text, _ := extract(t, resp); isErr {
+		t.Fatalf("save_stash on fresh session should succeed; got error: %s", text)
+	}
+
+	state, _, _ := session.Default.Snapshot()
+	if state != session.StateActive {
+		t.Fatalf("session state after first call = %v, want StateActive", state)
+	}
+
+	// Subsequent calls should also pass.
+	resp = callTool(t, "delete_stash", map[string]any{"name": "alpha"})
+	if isErr, text, _ := extract(t, resp); isErr {
+		t.Fatalf("delete_stash on active session should succeed; got error: %s", text)
 	}
 }
