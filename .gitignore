@@ -1,0 +1,33 @@
+# Binaries
+cred-mcp
+cred-mcp-linux
+cred-mcp-linux-amd64
+cred-mcp-linux-arm64
+cred-mcp-darwin-amd64
+cred-mcp-darwin-arm64
+cred-mcp-windows-amd64.exe
+
+# Build artifacts
+dist/
+build/
+*.test
+*.out
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local config / secrets
+.env
+.env.*
+!.env.example
+config.local.*
+
+# Logs
+*.log
+
+# Plugin assets that should be tracked are under plugin/
+!plugin/
+!plugin/**
