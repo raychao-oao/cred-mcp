@@ -13,6 +13,7 @@ import (
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
 	"github.com/raychao-oao/cred-mcp/internal/keychain"
+	"github.com/raychao-oao/cred-mcp/internal/session"
 )
 
 type request struct {
@@ -167,6 +168,17 @@ func handleToolCall(req *request, version string) response {
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return errResp(req.ID, -32602, err.Error())
+	}
+
+	// ping is a health check and never touches secrets, so it bypasses
+	// the session gate. Every other tool MUST go through it; the dispatch
+	// here is the single chokepoint so a future tool can't accidentally
+	// skip authorization by forgetting to call session.Default.Touch.
+	if p.Name != "ping" {
+		if err := session.Default.Touch(); err != nil {
+			log.Printf("tools/call %s denied: %v", p.Name, err)
+			return toolErrResp(req.ID, fmt.Sprintf("%v", err))
+		}
 	}
 
 	switch p.Name {

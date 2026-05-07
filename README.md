@@ -68,8 +68,8 @@ Plaintext is read from stdin, never from argv (no shell history leak).
 ## Security model & known gaps
 
 - **Plaintext never enters LLM context.** Tool responses and stderr logs carry only metadata (`name`, `status`, `note`, `ttl_seconds`). The clipboard is the side channel for the human user.
-- **No biometric gating yet.** `go-keyring` does not set ACLs, so reads of cred-mcp keychain entries do **not** trigger Touch ID / Windows Hello. The effective security model right now is "unlocked once the user is logged into the OS". `feat/biometric` will plug this gap (cgo + LocalAuthentication on Mac, Hello API on Win).
-- **No session expiry yet.** Once the cred-mcp process is running, any AI tool call within the Claude Code session can pull secrets. `feat/session` will add idle (30 min) / absolute (8 hr) sliding TTL.
+- **No biometric gating yet.** `go-keyring` does not set ACLs, so reads of cred-mcp keychain entries do **not** trigger Touch ID / Windows Hello. The effective security model right now is "unlocked once the user is logged into the OS". `feat/biometric` will plug this gap (cgo + LocalAuthentication on Mac, Hello API on Win) and become the unlock challenge for the session.
+- **Session expiry: idle 30 min / absolute 8 hr.** The first secret-touching tool call after process start auto-unlocks the session. Activity refreshes the idle timer. Once either TTL fires, the session is locked permanently for that process — every subsequent `copy_stash` / `save_stash` / `delete_stash` returns an error telling the user to restart cred-mcp. `ping` always works (it is a health check). State does not persist across restarts. `feat/biometric` will replace "restart to recover" with an in-process Touch ID prompt.
 - **No vault wiring yet.** `copy_stash` reads from the OS keychain directly. Bitwarden / Vaultwarden integration is `feat/vault` (planned).
 - **Cross-device sync is out of scope.** Each device's keychain is independent — this is intentional, not a bug. Vaultwarden handles human-side sync; cred-mcp handles per-device AI-side access.
 
