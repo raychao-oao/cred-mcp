@@ -1,17 +1,13 @@
-//go:build !darwin
+//go:build !darwin && !linux && !windows
 
 package biometric
 
-// Unlock on non-darwin currently grants access without a real challenge.
-// This keeps Linux / Windows builds compiling and behaviorally compatible
-// with the pre-feat/biometric AutoUnlock policy. A future change will
-// replace this with a real platform implementation:
-//
-//   - Windows: LogonUserExEx / Hello via Credential Manager APIs
-//   - Linux:   PAM / polkit, or punt to Vaultwarden's master password
-//
-// Until that lands, treat non-darwin builds as "unauthenticated by design"
-// and document the gap in the README.
+// Unlock on platforms without a real implementation (BSDs, plan9, etc.)
+// grants access without a challenge. Linux, Windows, and darwin each
+// have their own dedicated files; this is the catch-all that keeps those
+// other targets compiling. cred-mcp is not actively supported on these
+// platforms — this stub exists so users who build from source can still
+// produce a working binary.
 func Unlock() error {
 	return nil
 }

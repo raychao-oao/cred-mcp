@@ -31,9 +31,15 @@ func biometricUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  cred-mcp dev biometric test      Trigger a biometric prompt and report the outcome")
 	fmt.Println()
-	fmt.Println("Useful for verifying that the OS prompt fires (Touch ID / passcode on macOS)")
-	fmt.Println("without waiting for the session's idle TTL to expire inside the MCP server.")
-	fmt.Println("On non-darwin platforms this currently returns success without any prompt.")
+	fmt.Println("Useful for verifying the OS prompt fires without waiting for the session's")
+	fmt.Println("idle TTL to expire inside the MCP server.")
+	fmt.Println()
+	fmt.Println("Per-platform behavior:")
+	fmt.Println("  macOS         Touch ID / passcode prompt")
+	fmt.Println("  Windows       Windows Hello (via powershell.exe / UserConsentVerifier)")
+	fmt.Println("  WSL2          Bridges to Windows Hello on the host (via powershell.exe)")
+	fmt.Println("  Native Linux  Returns success without prompt (Phase 2: polkit TODO)")
+	fmt.Println("  BSDs etc.     Returns success without prompt (stub)")
 }
 
 func runBiometricTest() {
