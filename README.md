@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: Pre-1.0 (`v0.0.x`). Expect breaking changes. Use locally for now.
+**Status**: `v0.1.0` — early release. Core stash and vault tools are stable; biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
 
 ## What it does
 
