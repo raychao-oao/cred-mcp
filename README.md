@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.1.0` — early release. Core stash and vault tools are stable; biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
+**Status**: `v0.1.2` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
 
 ## What it does
 
@@ -21,7 +21,7 @@ Later, you ask AI: "I'm SSHing into prod, get me the password"
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
 ```
 
-## Tools (`v0.0.1`)
+## Tools (`v0.1.2`)
 
 | Tool | Purpose |
 |------|---------|
@@ -30,6 +30,8 @@ You paste into the SSH prompt; clipboard auto-restores after the TTL.
 | `copy_stash` | Read stored secret by `name`, put on clipboard for `ttl_seconds` (default 30, max 600). Auto-restores prior clipboard contents after the TTL unless the user has paste-and-replaced it. |
 | `delete_stash` | Remove a stored secret by `name`. |
 | `list_stash` | List metadata for all stored secrets (`name`, `source`, `created_at`). Values are never returned. Useful for migration: see what has already been moved into safe storage. |
+| `vault_search` | Search your Vaultwarden vault by name, username, or URI. Returns item metadata (never passwords). |
+| `vault_copy` | Copy a vault item field (password, TOTP, custom field) to the clipboard with a TTL. |
 
 All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`, `source`, `created_at`). The value is never serialized into the response or stderr logs.
 
@@ -83,7 +85,7 @@ Plaintext is read from stdin, never from argv (no shell history leak).
 - **Plaintext never enters LLM context.** Tool responses and stderr logs carry only metadata (`name`, `status`, `note`, `ttl_seconds`). The clipboard is the side channel for the human user.
 - **Biometric / passcode gating** (macOS only currently). The first secret-touching tool call after process start prompts Touch ID via `LAPolicyDeviceOwnerAuthentication` — Touch ID failure / absence falls back to the system password automatically. The prompt is OS-mediated and does not require a Cocoa event loop, so it works for a stdio-based MCP server. **Windows / Linux are not yet implemented**: those builds compile against a stub that grants unlock without prompting (effectively the pre-feat/biometric AutoUnlock policy). Per-platform support will land in follow-up branches; until then, only macOS gets a real challenge.
 - **Session expiry: idle 30 min / absolute 8 hr.** The first secret-touching tool call after process start triggers the unlock prompt; activity refreshes the idle timer. Once either TTL fires, the session enters Expired state — the next call re-runs the unlock policy (Touch ID / passcode prompt). On success, the session resumes with fresh timers. On user cancel / decline, the call is denied and state stays Expired (subsequent calls re-prompt). `ping` always bypasses the gate (health check). State does not persist across restarts.
-- **No vault wiring yet.** `copy_stash` reads from the OS keychain directly. Bitwarden / Vaultwarden integration is `feat/vault` (planned).
+- **Vault integration** (Vaultwarden / Bitwarden). `vault_search` and `vault_copy` connect to a self-hosted Vaultwarden instance. The master password is pulled from the OS keychain (never typed into the chat). Configure via `CRED_MCP_VAULT_URL`, `CRED_MCP_VAULT_USER`, and `CRED_MCP_VAULT_KEYCHAIN_ACCOUNT` environment variables in your `.mcp.json`.
 - **Cross-device sync is out of scope.** Each device's keychain is independent — this is intentional, not a bug. Vaultwarden handles human-side sync; cred-mcp handles per-device AI-side access.
 
 ## Plugin packaging
@@ -92,7 +94,7 @@ Two parallel packages, mirroring the `pty-mcp` / `pty-mcp-dev` split:
 
 | Package | Source | Purpose |
 |---------|--------|---------|
-| `cred-mcp` | GitHub release (planned) | End-user install via Claude Code marketplace |
+| `cred-mcp` | GitHub release | End-user install via Claude Code marketplace |
 | `cred-mcp-dev` | Local directory marketplace | Local dev build via `make install-dev` |
 
 Both register the same MCP server name (`cred-mcp`) in `.mcp.json` — only the plugin wrapper differs.
