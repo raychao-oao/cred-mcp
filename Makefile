@@ -2,7 +2,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 BIN     := cred-mcp
 
-DEV_PLUGIN_DIR := $(HOME)/.claude/plugins/local/cred-mcp-dev
+DEV_PLUGIN_DIR   := $(HOME)/.claude/plugins/local/cred-mcp-dev
+DEV_PLUGIN_VER   := $(shell cat $(HOME)/.claude/plugins/local/cred-mcp-dev/.claude-plugin/plugin.json 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "0.0.1-dev")
+DEV_CACHE_DIR    := $(HOME)/.claude/plugins/cache/cred-mcp-dev/cred-mcp-dev/$(DEV_PLUGIN_VER)
 
 .PHONY: build clean test cross install install-dev
 
@@ -26,6 +28,7 @@ install: build
 	cp $(BIN) $(GOPATH)/bin/$(BIN)
 
 # Build and copy binary into the local Claude Code plugin cache.
+# Claude Code reads from the cache dir, not the local plugin dir.
 # After running this, restart Claude Code to pick up the new binary.
 install-dev: build
 	@if [ ! -d "$(DEV_PLUGIN_DIR)" ]; then \
@@ -35,5 +38,9 @@ install-dev: build
 	fi
 	mkdir -p $(DEV_PLUGIN_DIR)/bin
 	cp $(BIN) $(DEV_PLUGIN_DIR)/bin/$(BIN)
-	@echo "Installed $(BIN) to $(DEV_PLUGIN_DIR)/bin/"
+	mkdir -p $(DEV_CACHE_DIR)/bin
+	cp $(BIN) $(DEV_CACHE_DIR)/bin/$(BIN)
+	@echo "Installed $(BIN) to:"
+	@echo "  $(DEV_PLUGIN_DIR)/bin/"
+	@echo "  $(DEV_CACHE_DIR)/bin/"
 	@echo "Restart Claude Code to load the new binary."

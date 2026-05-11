@@ -9,12 +9,14 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
 	"github.com/raychao-oao/cred-mcp/internal/index"
 	"github.com/raychao-oao/cred-mcp/internal/keychain"
 	"github.com/raychao-oao/cred-mcp/internal/session"
+	"github.com/raychao-oao/cred-mcp/internal/vault"
 )
 
 type request struct {
@@ -50,6 +52,37 @@ const (
 // defaultIndex is set by Serve and used by the stash handlers. Tests in
 // the same package may override it directly.
 var defaultIndex *index.Index
+
+// defaultVault is lazily initialized on first vault tool call.
+var defaultVault *vault.Client
+var defaultVaultErr error
+
+func vaultClient() (*vault.Client, error) {
+	if defaultVault != nil {
+		return defaultVault, nil
+	}
+	if defaultVaultErr != nil {
+		return nil, defaultVaultErr
+	}
+	cfg, err := vault.DefaultConfig()
+	if err != nil {
+		defaultVaultErr = err
+		return nil, err
+	}
+	c := vault.New(cfg.BaseURL, cfg.CFClientID, cfg.CFClientSecret)
+	masterPassword, err := keychain.Get("vaultwarden-master-ray")
+	if err != nil {
+		defaultVaultErr = fmt.Errorf("master password not in keychain (stash key: vaultwarden-master-ray): %w", err)
+		return nil, defaultVaultErr
+	}
+	if err := c.Login(cfg.Email, masterPassword); err != nil {
+		defaultVaultErr = fmt.Errorf("vault login failed: %w", err)
+		return nil, defaultVaultErr
+	}
+	defaultVault = c
+	log.Printf("vault: authenticated as %s", cfg.Email)
+	return c, nil
+}
 
 func ensureDefaultIndex() {
 	if defaultIndex != nil {
@@ -135,6 +168,44 @@ var toolsList = []map[string]any{
 		"inputSchema": map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
+		},
+	},
+	{
+		"name": "vault_search",
+		"description": "Search the Vaultwarden vault for login items matching a query. " +
+			"Returns metadata only (id, name, username, URIs) — never passwords. " +
+			"Use vault_copy with the returned id to place a password on the clipboard.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Case-insensitive substring to match against item name or URI. Empty string returns all login items.",
+				},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		"name": "vault_copy",
+		"description": "Copy a vault item's password to the user's clipboard for a limited time. " +
+			"The password never enters the conversation; only metadata is returned. " +
+			"Use vault_search first to get the item id.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":        "string",
+					"description": "Item ID from vault_search.",
+				},
+				"ttl_seconds": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("Seconds before the clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
+					"minimum":     1,
+					"maximum":     maxCopyTTLSeconds,
+				},
+			},
+			"required": []string{"id"},
 		},
 	},
 }
@@ -224,6 +295,10 @@ func handleToolCall(req *request, version string) response {
 		return handleDeleteStash(req.ID, p.Arguments)
 	case "list_stash":
 		return handleListStash(req.ID, p.Arguments)
+	case "vault_search":
+		return handleVaultSearch(req.ID, p.Arguments)
+	case "vault_copy":
+		return handleVaultCopy(req.ID, p.Arguments)
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}
@@ -403,5 +478,93 @@ func handleListStash(id any, _ json.RawMessage) response {
 	return okResp(id, map[string]any{
 		"count":   len(entries),
 		"entries": out,
+	})
+}
+
+type vaultSearchArgs struct {
+	Query string `json:"query"`
+}
+
+func handleVaultSearch(id any, raw json.RawMessage) response {
+	var args vaultSearchArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+
+	vc, err := vaultClient()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
+	}
+
+	items, err := vc.Search(args.Query)
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault search: %v", err))
+	}
+
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]any{
+			"id":       it.ID,
+			"name":     it.Name,
+			"username": it.Username,
+			"uris":     it.URIs,
+		})
+	}
+	return okResp(id, map[string]any{
+		"count": len(items),
+		"items": out,
+	})
+}
+
+type vaultCopyArgs struct {
+	ID         string `json:"id"`
+	TTLSeconds int    `json:"ttl_seconds"`
+}
+
+func handleVaultCopy(id any, raw json.RawMessage) response {
+	var args vaultCopyArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return toolErrResp(id, "id is required")
+	}
+	ttlSeconds := args.TTLSeconds
+	if ttlSeconds <= 0 {
+		ttlSeconds = defaultCopyTTLSeconds
+	}
+	if ttlSeconds > maxCopyTTLSeconds {
+		ttlSeconds = maxCopyTTLSeconds
+	}
+
+	vc, err := vaultClient()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
+	}
+
+	secret, err := vc.Secret(args.ID)
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault get secret: %v", err))
+	}
+
+	ttl := time.Duration(ttlSeconds) * time.Second
+	wait, err := clipboard.SetWithAutoClear(context.Background(), secret, ttl)
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
+	}
+	go func() {
+		result := wait()
+		log.Printf("vault_copy id=%q ttl=%s result=%s", args.ID, ttl, result)
+	}()
+
+	return okResp(id, map[string]any{
+		"id":          args.ID,
+		"ttl_seconds": ttlSeconds,
+		"status":      "copied",
+		"note":        "Password is on the clipboard. It will be restored after the TTL.",
 	})
 }
