@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cred-mcp": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cred-mcp",
+      "args": []
+    }
+  }
+}
