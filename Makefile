@@ -9,7 +9,7 @@ DEV_CACHE_DIR    := $(HOME)/.claude/plugins/cache/cred-mcp-dev/cred-mcp-dev/$(DE
 .PHONY: build clean test cross install install-dev
 
 build:
-	go build -ldflags '$(LDFLAGS)' -o $(BIN) .
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) .
 
 test:
 	go test ./...
