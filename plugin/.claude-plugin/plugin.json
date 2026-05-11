@@ -1,0 +1,13 @@
+{
+  "name": "cred-mcp",
+  "version": "0.1.1",
+  "description": "Credential management MCP server — store secrets in your OS keychain and Vaultwarden vault, hand them to AI workflows without ever putting plaintext into the LLM context.",
+  "author": {
+    "name": "raychao-oao",
+    "url": "https://github.com/raychao-oao"
+  },
+  "homepage": "https://github.com/raychao-oao/cred-mcp",
+  "repository": "https://github.com/raychao-oao/cred-mcp",
+  "license": "MIT",
+  "keywords": ["credentials", "keychain", "vault", "secrets", "mcp", "security"]
+}
