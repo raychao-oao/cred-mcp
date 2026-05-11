@@ -9,13 +9,13 @@
 `cred-mcp` is a stdio MCP server. AI agents (Claude Code et al.) call its tools to **stash** and **retrieve** secrets. The plaintext value never appears in the conversation: `save_stash` reads it from your clipboard, `copy_stash` writes it back to your clipboard with a TTL.
 
 ```
-You copy a password    →    You ask AI: "save it as asablue-ssh"
-                            AI calls save_stash{name: "asablue-ssh"}
+You copy a password    →    You ask AI: "save it as prod-ssh"
+                            AI calls save_stash{name: "prod-ssh"}
                             cred-mcp reads clipboard, writes OS keychain
                             (response carries only the name; LLM never sees the value)
 
-Later, you ask AI: "I'm SSHing into asablue, get me the password"
-                            AI calls copy_stash{name: "asablue-ssh"}
+Later, you ask AI: "I'm SSHing into prod, get me the password"
+                            AI calls copy_stash{name: "prod-ssh"}
                             cred-mcp pulls from keychain, puts on clipboard for 30s
                             (response carries only metadata; LLM never sees the value)
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
