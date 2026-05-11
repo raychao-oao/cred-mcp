@@ -70,9 +70,9 @@ func vaultClient() (*vault.Client, error) {
 		return nil, err
 	}
 	c := vault.New(cfg.BaseURL, cfg.CFClientID, cfg.CFClientSecret)
-	masterPassword, err := keychain.Get("vaultwarden-master-ray")
+	masterPassword, err := keychain.Get(cfg.MasterStashKey)
 	if err != nil {
-		defaultVaultErr = fmt.Errorf("master password not in keychain (stash key: vaultwarden-master-ray): %w", err)
+		defaultVaultErr = fmt.Errorf("master password not in keychain (stash key: %q): %w", cfg.MasterStashKey, err)
 		return nil, defaultVaultErr
 	}
 	if err := c.Login(cfg.Email, masterPassword); err != nil {
