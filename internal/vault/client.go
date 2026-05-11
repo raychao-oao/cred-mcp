@@ -162,6 +162,8 @@ func (c *Client) connectToken(email, masterKeyHashB64 string) (accessToken, prot
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Bitwarden-Client-Name", "web")
+	req.Header.Set("Bitwarden-Client-Version", "2024.10.2")
 
 	var result struct {
 		AccessToken string `json:"access_token"`
