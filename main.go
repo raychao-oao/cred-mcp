@@ -47,9 +47,11 @@ func main() {
 	// session.Default rather than poking its internals keeps the session
 	// package free of platform conditionals — biometric.Unlock is the only
 	// place that knows whether we have a real OS challenge or a stub.
-	unlockPolicy := biometric.Unlock
-	if err := biometric.Unlock(); err == biometric.ErrUnavailable {
-		unlockPolicy = session.AutoUnlock
+	// Available() checks capability without prompting; the actual prompt fires
+	// lazily on the first secret-touching tool call via session.Touch().
+	unlockPolicy := session.AutoUnlock
+	if biometric.Available() {
+		unlockPolicy = biometric.Unlock
 	}
 	session.Default = session.New(session.DefaultIdleTTL, session.DefaultAbsoluteTTL, unlockPolicy)
 
