@@ -37,8 +37,10 @@ install-dev: build
 		exit 1; \
 	fi
 	mkdir -p $(DEV_PLUGIN_DIR)/bin
+	rm -f $(DEV_PLUGIN_DIR)/bin/$(BIN)
 	cp $(BIN) $(DEV_PLUGIN_DIR)/bin/$(BIN)
 	mkdir -p $(DEV_CACHE_DIR)/bin
+	rm -f $(DEV_CACHE_DIR)/bin/$(BIN)
 	cp $(BIN) $(DEV_CACHE_DIR)/bin/$(BIN)
 	@echo "Installed $(BIN) to:"
 	@echo "  $(DEV_PLUGIN_DIR)/bin/"
