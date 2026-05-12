@@ -7,3 +7,6 @@ package biometric
 func Unlock() error {
 	return ErrUnavailable
 }
+
+// Available reports whether biometric auth is available. Always false without cgo.
+func Available() bool { return false }

@@ -11,3 +11,7 @@ package biometric
 func Unlock() error {
 	return nil
 }
+
+// Available reports whether a real auth challenge is available. Always false
+// on unsupported platforms — Unlock() grants access without prompting.
+func Available() bool { return false }

@@ -22,3 +22,8 @@ func Unlock() error {
 	// dependency and tw.nowhere.cred-mcp.policy file land.
 	return nil
 }
+
+// Available reports whether a real auth challenge will be presented.
+// WSL2 bridges to Windows Hello (real challenge); native Linux currently
+// grants access without prompting, so callers should use AutoUnlock directly.
+func Available() bool { return isWSL() }

@@ -15,6 +15,16 @@ package biometric
 #define CRED_BIO_UNAVAILABLE 2
 #define CRED_BIO_OTHER       3
 
+// cred_mcp_biometric_available returns 1 if the device supports
+// LAPolicyDeviceOwnerAuthentication without prompting the user.
+static int cred_mcp_biometric_available(void) {
+    @autoreleasepool {
+        LAContext *ctx = [[LAContext alloc] init];
+        NSError *error = nil;
+        return [ctx canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication error:&error] ? 1 : 0;
+    }
+}
+
 // cred_mcp_biometric_unlock blocks until the user authenticates, cancels,
 // or the OS rejects the request. Uses LAPolicyDeviceOwnerAuthentication so
 // Touch ID failure / absence falls back to the system password automatically.
@@ -55,6 +65,12 @@ import (
 )
 
 const defaultReason = "cred-mcp wants to access your stashed secrets"
+
+// Available reports whether the device can present a biometric / passcode
+// challenge without prompting the user.
+func Available() bool {
+	return int(C.cred_mcp_biometric_available()) == 1
+}
 
 // Unlock presents a Touch ID / passcode prompt and blocks until the user
 // resolves it. Returns nil on success, ErrCancelled if the user dismissed
