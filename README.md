@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.1.2` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
+**Status**: `v0.1.3` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
 
 ## What it does
 
@@ -21,7 +21,7 @@ Later, you ask AI: "I'm SSHing into prod, get me the password"
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
 ```
 
-## Tools (`v0.1.2`)
+## Tools (`v0.1.3`)
 
 | Tool | Purpose |
 |------|---------|
