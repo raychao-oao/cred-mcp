@@ -13,3 +13,8 @@ package biometric
 func Unlock() error {
 	return windowsHelloUnlock()
 }
+
+// Available reports whether Windows Hello is available. Always true on
+// Windows — windowsHelloUnlock will surface the error if Hello is not
+// configured on a specific machine.
+func Available() bool { return true }
