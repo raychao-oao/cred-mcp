@@ -99,6 +99,19 @@ Two parallel packages, mirroring the `pty-mcp` / `pty-mcp-dev` split:
 
 Both register the same MCP server name (`cred-mcp`) in `.mcp.json` — only the plugin wrapper differs.
 
+## Troubleshooting
+
+**MCP connection fails at Claude Code startup**
+
+This is a race condition: Claude Code sometimes tries to reach the MCP server before it finishes initializing. It resolves on its own — wait a few seconds, then run `ping` to confirm:
+
+```
+AI: ping
+→ {"ok": true, "version": "...", "time": "..."}
+```
+
+No binary reinstall or restart needed. If `ping` succeeds, the server is running fine.
+
 ## Related projects
 
 - [pty-mcp](https://github.com/raychao-oao/pty-mcp) — sibling: interactive PTY sessions for AI agents (SSH, local shell, serial port).
