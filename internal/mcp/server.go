@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/raychao-oao/cred-mcp/internal/clipboard"
+	"github.com/raychao-oao/cred-mcp/internal/dialog"
 	"github.com/raychao-oao/cred-mcp/internal/index"
 	"github.com/raychao-oao/cred-mcp/internal/keychain"
 	"github.com/raychao-oao/cred-mcp/internal/session"
@@ -189,8 +190,7 @@ var toolsList = []map[string]any{
 	{
 		"name": "vault_add",
 		"description": "Create a new login item in the vault. " +
-			"The password is read from the user's clipboard and never enters the conversation. " +
-			"Ask the user to copy the password to the clipboard before calling this tool. " +
+			"The password is never exposed in the conversation — it is sourced from a GUI dialog (default) or clipboard. " +
 			"Returns the new item's id and metadata.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -208,6 +208,11 @@ var toolsList = []map[string]any{
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional list of URIs associated with the item (e.g. hostnames, URLs).",
 				},
+				"password_source": map[string]any{
+					"type":        "string",
+					"enum":        []string{"dialog", "clipboard"},
+					"description": "How to obtain the password. \"dialog\" (default) pops a native GUI input; \"clipboard\" reads the current clipboard contents.",
+				},
 			},
 			"required": []string{"name"},
 		},
@@ -216,7 +221,7 @@ var toolsList = []map[string]any{
 		"name": "vault_update",
 		"description": "Update an existing vault login item. " +
 			"Omit a field to leave it unchanged. " +
-			"Set update_password=true to replace the password from the clipboard (never from conversation). " +
+			"Set update_password=true to replace the password via GUI dialog or clipboard (never from conversation). " +
 			"Use vault_search first to get the item id.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -240,7 +245,12 @@ var toolsList = []map[string]any{
 				},
 				"update_password": map[string]any{
 					"type":        "boolean",
-					"description": "If true, replace the password with whatever is currently on the clipboard.",
+					"description": "If true, replace the password (sourced via password_source).",
+				},
+				"password_source": map[string]any{
+					"type":        "string",
+					"enum":        []string{"dialog", "clipboard"},
+					"description": "How to obtain the new password when update_password=true. \"dialog\" (default) pops a native GUI input; \"clipboard\" reads the current clipboard.",
 				},
 			},
 			"required": []string{"id"},
@@ -582,10 +592,35 @@ func handleVaultSearch(id any, raw json.RawMessage) response {
 	})
 }
 
+// readPassword obtains a secret via dialog (default) or clipboard.
+// source="" or "dialog" → native GUI prompt; "clipboard" → current clipboard.
+func readPassword(source, prompt string) (string, error) {
+	if source == "clipboard" {
+		val, err := clipboard.Read()
+		if err != nil {
+			return "", fmt.Errorf("clipboard error: %v", err)
+		}
+		if val == "" {
+			return "", fmt.Errorf("clipboard is empty — ask the user to copy the password first")
+		}
+		return val, nil
+	}
+	// default: dialog
+	val, err := dialog.ReadSecret(prompt)
+	if err != nil {
+		return "", fmt.Errorf("dialog error: %v", err)
+	}
+	if val == "" {
+		return "", fmt.Errorf("no password entered")
+	}
+	return val, nil
+}
+
 type vaultAddArgs struct {
-	Name     string   `json:"name"`
-	Username string   `json:"username"`
-	URIs     []string `json:"uris"`
+	Name           string   `json:"name"`
+	Username       string   `json:"username"`
+	URIs           []string `json:"uris"`
+	PasswordSource string   `json:"password_source"`
 }
 
 func handleVaultAdd(id any, raw json.RawMessage) response {
@@ -599,12 +634,9 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 		return toolErrResp(id, "name is required")
 	}
 
-	password, err := clipboard.Read()
+	password, err := readPassword(args.PasswordSource, fmt.Sprintf("Password for %q", args.Name))
 	if err != nil {
-		return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
-	}
-	if password == "" {
-		return toolErrResp(id, "clipboard is empty — ask the user to copy the password first")
+		return toolErrResp(id, err.Error())
 	}
 
 	vc, err := vaultClient()
@@ -633,6 +665,7 @@ type vaultUpdateArgs struct {
 	Username       string   `json:"username"`
 	URIs           []string `json:"uris"`
 	UpdatePassword bool     `json:"update_password"`
+	PasswordSource string   `json:"password_source"`
 }
 
 func handleVaultUpdate(id any, raw json.RawMessage) response {
@@ -649,12 +682,9 @@ func handleVaultUpdate(id any, raw json.RawMessage) response {
 	var password string
 	if args.UpdatePassword {
 		var err error
-		password, err = clipboard.Read()
+		password, err = readPassword(args.PasswordSource, fmt.Sprintf("New password for item %q", args.ID))
 		if err != nil {
-			return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
-		}
-		if password == "" {
-			return toolErrResp(id, "clipboard is empty — ask the user to copy the new password first")
+			return toolErrResp(id, err.Error())
 		}
 	}
 
