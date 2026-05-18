@@ -187,6 +187,66 @@ var toolsList = []map[string]any{
 		},
 	},
 	{
+		"name": "vault_add",
+		"description": "Create a new login item in the vault. " +
+			"The password is read from the user's clipboard and never enters the conversation. " +
+			"Ask the user to copy the password to the clipboard before calling this tool. " +
+			"Returns the new item's id and metadata.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Display name for the new item (e.g. \"SSID: AST_BYOD\").",
+				},
+				"username": map[string]any{
+					"type":        "string",
+					"description": "Username or account identifier. Pass empty string if not applicable.",
+				},
+				"uris": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional list of URIs associated with the item (e.g. hostnames, URLs).",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		"name": "vault_update",
+		"description": "Update an existing vault login item. " +
+			"Omit a field to leave it unchanged. " +
+			"Set update_password=true to replace the password from the clipboard (never from conversation). " +
+			"Use vault_search first to get the item id.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":        "string",
+					"description": "Item ID from vault_search.",
+				},
+				"name": map[string]any{
+					"type":        "string",
+					"description": "New display name. Omit to keep existing.",
+				},
+				"username": map[string]any{
+					"type":        "string",
+					"description": "New username. Omit to keep existing.",
+				},
+				"uris": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Replacement URI list. Omit to keep existing.",
+				},
+				"update_password": map[string]any{
+					"type":        "boolean",
+					"description": "If true, replace the password with whatever is currently on the clipboard.",
+				},
+			},
+			"required": []string{"id"},
+		},
+	},
+	{
 		"name": "vault_copy",
 		"description": "Copy a vault item's password to the user's clipboard for a limited time. " +
 			"The password never enters the conversation; only metadata is returned. " +
@@ -297,6 +357,10 @@ func handleToolCall(req *request, version string) response {
 		return handleListStash(req.ID, p.Arguments)
 	case "vault_search":
 		return handleVaultSearch(req.ID, p.Arguments)
+	case "vault_add":
+		return handleVaultAdd(req.ID, p.Arguments)
+	case "vault_update":
+		return handleVaultUpdate(req.ID, p.Arguments)
 	case "vault_copy":
 		return handleVaultCopy(req.ID, p.Arguments)
 	default:
@@ -515,6 +579,113 @@ func handleVaultSearch(id any, raw json.RawMessage) response {
 	return okResp(id, map[string]any{
 		"count": len(items),
 		"items": out,
+	})
+}
+
+type vaultAddArgs struct {
+	Name     string   `json:"name"`
+	Username string   `json:"username"`
+	URIs     []string `json:"uris"`
+}
+
+func handleVaultAdd(id any, raw json.RawMessage) response {
+	var args vaultAddArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if strings.TrimSpace(args.Name) == "" {
+		return toolErrResp(id, "name is required")
+	}
+
+	password, err := clipboard.Read()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
+	}
+	if password == "" {
+		return toolErrResp(id, "clipboard is empty — ask the user to copy the password first")
+	}
+
+	vc, err := vaultClient()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
+	}
+
+	newID, err := vc.Add(args.Name, args.Username, password, args.URIs)
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault add: %v", err))
+	}
+
+	return okResp(id, map[string]any{
+		"id":       newID,
+		"name":     args.Name,
+		"username": args.Username,
+		"uris":     args.URIs,
+		"status":   "created",
+		"note":     "Password was read from clipboard and stored encrypted. It never entered the conversation.",
+	})
+}
+
+type vaultUpdateArgs struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Username       string   `json:"username"`
+	URIs           []string `json:"uris"`
+	UpdatePassword bool     `json:"update_password"`
+}
+
+func handleVaultUpdate(id any, raw json.RawMessage) response {
+	var args vaultUpdateArgs
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return errResp(id, -32602, fmt.Sprintf("invalid arguments: %v", err))
+		}
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return toolErrResp(id, "id is required")
+	}
+
+	var password string
+	if args.UpdatePassword {
+		var err error
+		password, err = clipboard.Read()
+		if err != nil {
+			return toolErrResp(id, fmt.Sprintf("clipboard error: %v", err))
+		}
+		if password == "" {
+			return toolErrResp(id, "clipboard is empty — ask the user to copy the new password first")
+		}
+	}
+
+	vc, err := vaultClient()
+	if err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
+	}
+
+	updateURIs := args.URIs != nil
+	if err := vc.Update(args.ID, args.Name, args.Username, password, args.URIs, updateURIs); err != nil {
+		return toolErrResp(id, fmt.Sprintf("vault update: %v", err))
+	}
+
+	updated := []string{}
+	if args.Name != "" {
+		updated = append(updated, "name")
+	}
+	if args.Username != "" {
+		updated = append(updated, "username")
+	}
+	if updateURIs {
+		updated = append(updated, "uris")
+	}
+	if args.UpdatePassword {
+		updated = append(updated, "password")
+	}
+
+	return okResp(id, map[string]any{
+		"id":      args.ID,
+		"updated": updated,
+		"status":  "updated",
 	})
 }
 
