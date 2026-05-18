@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -114,6 +115,41 @@ func decryptEncString(encStr string, encKey, macKey []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unpad: %w", err)
 	}
 	return plain, nil
+}
+
+// encryptStr encrypts a plaintext string into a Bitwarden EncString (type 2:
+// AES-256-CBC + HMAC-SHA256). Returns "" for empty input.
+func encryptStr(plaintext string, encKey, macKey []byte) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	iv := make([]byte, aes.BlockSize)
+	if _, err := rand.Read(iv); err != nil {
+		return "", fmt.Errorf("generate iv: %w", err)
+	}
+	padded := pkcs7Pad([]byte(plaintext))
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return "", err
+	}
+	ct := make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ct, padded)
+
+	h := hmac.New(sha256.New, macKey)
+	h.Write(iv)
+	h.Write(ct)
+	mac := h.Sum(nil)
+
+	return fmt.Sprintf("2.%s|%s|%s",
+		base64.StdEncoding.EncodeToString(iv),
+		base64.StdEncoding.EncodeToString(ct),
+		base64.StdEncoding.EncodeToString(mac),
+	), nil
+}
+
+func pkcs7Pad(b []byte) []byte {
+	pad := aes.BlockSize - len(b)%aes.BlockSize
+	return append(b, bytes.Repeat([]byte{byte(pad)}, pad)...)
 }
 
 func pkcs7Unpad(b []byte) ([]byte, error) {
