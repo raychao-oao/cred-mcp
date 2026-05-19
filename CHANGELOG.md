@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-05-19
+
+### Fixed
+- Vault session expiry (HTTP 401) no longer requires `/mcp reconnect`: all vault operations now automatically re-authenticate and retry once when the Vaultwarden API session expires after idle 30 min or absolute 8 hr.
+- Removed duplicate `vault_copy` entry in the tools list.
+
 ## [0.3.1] - 2026-05-19
 
 ### Fixed
