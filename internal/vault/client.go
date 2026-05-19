@@ -12,16 +12,21 @@ import (
 	"time"
 )
 
+// ErrUnauthorized is returned by vault operations when the Vaultwarden API
+// session has expired (HTTP 401). Callers can detect this with errors.Is and
+// re-authenticate automatically.
+var ErrUnauthorized = fmt.Errorf("vault: session expired (401)")
+
 // Client authenticates with a Vaultwarden instance and provides decrypted
 // item access. Create with New; call Login before any search or copy operation.
 type Client struct {
-	baseURL    string
-	http       *http.Client
-	cfID       string
-	cfSecret   string
-	accessToken string    // Bitwarden JWT obtained on Login
-	symKey     [64]byte   // decrypted symmetric key: [0:32]=enc, [32:64]=mac
-	symKeySet  bool
+	baseURL     string
+	http        *http.Client
+	cfID        string
+	cfSecret    string
+	accessToken string   // Bitwarden JWT obtained on Login
+	symKey      [64]byte // decrypted symmetric key: [0:32]=enc, [32:64]=mac
+	symKeySet   bool
 }
 
 // New creates a Client for the given Vaultwarden base URL (e.g. "https://vault.example.com").
@@ -119,6 +124,9 @@ func (c *Client) doJSON(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 401 {
+		return ErrUnauthorized
+	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
 	}
