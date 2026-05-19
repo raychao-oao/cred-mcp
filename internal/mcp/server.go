@@ -96,31 +96,62 @@ func ensureDefaultIndex() {
 	defaultIndex = idx
 }
 
+// Two storage systems:
+//
+//	STASH — OS keychain, named slots, clipboard in/out.
+//	        Use when the user copies a secret and wants AI to handle it later.
+//	        Typical flow: user copies → save_stash → later copy_stash → user pastes.
+//
+//	VAULT — Vaultwarden (persistent credential store), searchable.
+//	        Use when the user needs a saved credential by service name / username / URI.
+//	        Typical flow: vault_search → vault_copy → user pastes.
+//
+// Secret values NEVER appear in tool responses or conversation history.
 var toolsList = []map[string]any{
 	{
 		"name":        "ping",
-		"description": "Health check. Returns server version and current time. Used to verify cred-mcp is reachable; no credentials are accessed.",
+		"description": "Health check — confirms cred-mcp is running. Call this if the user asks whether cred-mcp is connected, or to get the server version. No credentials are accessed.",
 		"inputSchema": map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
 		},
 	},
 	{
-		"name": "copy_stash",
-		"description": "Copy a stored secret to the user's clipboard for a limited time. " +
-			"The secret value never enters the conversation; only metadata (name, ttl) is returned. " +
-			"After the TTL expires the clipboard is restored to its prior contents " +
-			"(unless the user has pasted-and-replaced it in the meantime).",
+		// STASH tools
+		"name": "save_stash",
+		"description": "STASH: Save the secret currently on the user's clipboard into a named slot in the OS keychain. " +
+			"Call this when the user says they have copied a password, token, or key and wants to store it (e.g. \"save this as prod-ssh\"). " +
+			"The value is read directly from the clipboard — it never enters the conversation. " +
+			"The clipboard is left untouched after saving. " +
+			"Overwrites any existing entry with the same name.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "Identifier of the stored secret (no colons).",
+					"description": "Short identifier for this secret (e.g. \"prod-ssh\", \"github-token\"). No colons.",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		"name": "copy_stash",
+		"description": "STASH: Put a previously saved secret onto the user's clipboard so they can paste it. " +
+			"Call this when the user asks to retrieve a stashed secret (e.g. \"get the prod-ssh password\", \"copy github-token to clipboard\"). " +
+			"If you're unsure of the exact name, call list_stash first. " +
+			"The secret is placed on the clipboard for ttl_seconds, then the prior clipboard content is restored. " +
+			"The value never appears in the response — only metadata (name, ttl) is returned.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Name of the secret to retrieve (as given to save_stash).",
 				},
 				"ttl_seconds": map[string]any{
 					"type":        "integer",
-					"description": fmt.Sprintf("Seconds before the clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
+					"description": fmt.Sprintf("How long to leave the secret on the clipboard before restoring the prior content (default %d s, max %d s).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
 					"minimum":     1,
 					"maximum":     maxCopyTTLSeconds,
 				},
@@ -129,89 +160,95 @@ var toolsList = []map[string]any{
 		},
 	},
 	{
-		"name": "save_stash",
-		"description": "Store the secret currently on the user's clipboard under the given name. " +
-			"The secret value never enters the conversation: it is read directly from the clipboard " +
-			"and written to the OS keychain. " +
-			"The user's clipboard is left untouched after a successful stash — managing it (paste, replace, etc.) is up to the user. " +
-			"Use this when the user has just copied a password/token they want stashed for later retrieval. " +
-			"Overwrites any existing entry with the same name.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Identifier to store the secret under (no colons, must not be empty).",
-				},
-			},
-			"required": []string{"name"},
-		},
-	},
-	{
-		"name": "delete_stash",
-		"description": "Delete a stored secret by name. Returns an error if no entry exists with that name.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Identifier of the stored secret to delete (no colons).",
-				},
-			},
-			"required": []string{"name"},
-		},
-	},
-	{
-		"name": "list_stash",
-		"description": "List the names of all stored secrets known to cred-mcp. " +
-			"Returns only metadata (name, source, created_at) — never the values. " +
-			"Sorted by source then name. Useful during migration to see what has already been moved into safe storage.",
+		"name":        "list_stash",
+		"description": "STASH: List all named secrets currently saved in the stash. Returns only metadata (name, created_at) — never values. Call this when the user asks what secrets are stored, or when you need to verify a name before calling copy_stash.",
 		"inputSchema": map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
 		},
 	},
 	{
+		"name":        "delete_stash",
+		"description": "STASH: Permanently delete a named secret from the stash. Call when the user asks to remove or clean up a stored secret.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "Name of the secret to delete.",
+				},
+			},
+			"required": []string{"name"},
+		},
+	},
+	{
+		// VAULT tools
 		"name": "vault_search",
-		"description": "Search the Vaultwarden vault for login items matching a query. " +
+		"description": "VAULT: Search the Vaultwarden credential vault and return matching login items. " +
+			"Call this first whenever the user needs a saved credential — e.g. \"get the password for asablue\", \"find the router login\". " +
+			"Matches case-insensitively against item name, username, and URI. " +
 			"Returns metadata only (id, name, username, URIs) — never passwords. " +
-			"Use vault_copy with the returned id to place a password on the clipboard.",
+			"Use the returned id with vault_copy to put the password on the clipboard.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query": map[string]any{
 					"type":        "string",
-					"description": "Case-insensitive substring to match against item name or URI. Empty string returns all login items.",
+					"description": "Substring to search for (name, username, or URI). Use empty string to list all items.",
 				},
 			},
 			"required": []string{"query"},
 		},
 	},
 	{
+		"name": "vault_copy",
+		"description": "VAULT: Copy a vault item's password to the clipboard. " +
+			"Always call vault_search first to find the item and get its id. " +
+			"The password is placed on the clipboard for ttl_seconds — tell the user to paste now. " +
+			"The password never enters the conversation; only metadata is returned.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"id": map[string]any{
+					"type":        "string",
+					"description": "Item ID from vault_search.",
+				},
+				"ttl_seconds": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("Seconds before clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
+					"minimum":     1,
+					"maximum":     maxCopyTTLSeconds,
+				},
+			},
+			"required": []string{"id"},
+		},
+	},
+	{
 		"name": "vault_add",
-		"description": "Create a new login item in the vault. " +
-			"The password is never exposed in the conversation — it is sourced from a GUI dialog (default) or clipboard. " +
+		"description": "VAULT: Add a new login item to the vault. " +
+			"Call this when the user wants to permanently save new credentials (e.g. \"add the new router password to the vault\"). " +
+			"The password is entered via a native GUI dialog (default) or read from the clipboard — it never comes from the conversation. " +
 			"Returns the new item's id and metadata.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "Display name for the new item (e.g. \"SSID: AST_BYOD\").",
+					"description": "Display name for the item (e.g. \"prod-router\", \"GitHub raychao-oao\").",
 				},
 				"username": map[string]any{
 					"type":        "string",
-					"description": "Username or account identifier. Pass empty string if not applicable.",
+					"description": "Username or account identifier. Omit or pass empty string if not applicable.",
 				},
 				"uris": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional list of URIs associated with the item (e.g. hostnames, URLs).",
+					"description": "Optional list of hostnames or URLs for this credential (helps vault_search find it later).",
 				},
 				"password_source": map[string]any{
 					"type":        "string",
 					"enum":        []string{"dialog", "clipboard"},
-					"description": "How to obtain the password. \"dialog\" (default) pops a native GUI input; \"clipboard\" reads the current clipboard contents.",
+					"description": "\"dialog\" (default): a native GUI prompt appears for the user to type the password. \"clipboard\": the password is read from the current clipboard.",
 				},
 			},
 			"required": []string{"name"},
@@ -219,10 +256,10 @@ var toolsList = []map[string]any{
 	},
 	{
 		"name": "vault_update",
-		"description": "Update an existing vault login item. " +
-			"Omit a field to leave it unchanged. " +
-			"Set update_password=true to replace the password via GUI dialog or clipboard (never from conversation). " +
-			"Use vault_search first to get the item id.",
+		"description": "VAULT: Update an existing vault item's name, username, URIs, or password. " +
+			"Call vault_search first to find the item id. " +
+			"Omit any field to leave it unchanged. " +
+			"Set update_password=true to replace the password — it will be sourced via GUI dialog or clipboard, never from the conversation.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -594,8 +631,19 @@ func handleVaultSearch(id any, raw json.RawMessage) response {
 
 // readPassword obtains a secret via dialog (default) or clipboard.
 // source="" or "dialog" → native GUI prompt; "clipboard" → current clipboard.
+// Any other value is rejected.
 func readPassword(source, prompt string) (string, error) {
-	if source == "clipboard" {
+	switch source {
+	case "", "dialog":
+		val, err := dialog.ReadSecret(prompt)
+		if err != nil {
+			return "", fmt.Errorf("dialog error: %v", err)
+		}
+		if val == "" {
+			return "", fmt.Errorf("no password entered")
+		}
+		return val, nil
+	case "clipboard":
 		val, err := clipboard.Read()
 		if err != nil {
 			return "", fmt.Errorf("clipboard error: %v", err)
@@ -604,16 +652,9 @@ func readPassword(source, prompt string) (string, error) {
 			return "", fmt.Errorf("clipboard is empty — ask the user to copy the password first")
 		}
 		return val, nil
+	default:
+		return "", fmt.Errorf("unknown password_source %q: must be \"dialog\" or \"clipboard\"", source)
 	}
-	// default: dialog
-	val, err := dialog.ReadSecret(prompt)
-	if err != nil {
-		return "", fmt.Errorf("dialog error: %v", err)
-	}
-	if val == "" {
-		return "", fmt.Errorf("no password entered")
-	}
-	return val, nil
 }
 
 type vaultAddArgs struct {
@@ -633,6 +674,9 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 	if strings.TrimSpace(args.Name) == "" {
 		return toolErrResp(id, "name is required")
 	}
+	if args.PasswordSource == "" {
+		args.PasswordSource = "dialog"
+	}
 
 	password, err := readPassword(args.PasswordSource, fmt.Sprintf("Password for %q", args.Name))
 	if err != nil {
@@ -650,12 +694,13 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 	}
 
 	return okResp(id, map[string]any{
-		"id":       newID,
-		"name":     args.Name,
-		"username": args.Username,
-		"uris":     args.URIs,
-		"status":   "created",
-		"note":     "Password was read from clipboard and stored encrypted. It never entered the conversation.",
+		"id":              newID,
+		"name":            args.Name,
+		"username":        args.Username,
+		"uris":            args.URIs,
+		"status":          "created",
+		"note":            "Password stored encrypted. It never entered the conversation.",
+		"password_source": args.PasswordSource,
 	})
 }
 

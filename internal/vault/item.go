@@ -18,9 +18,9 @@ type Item struct {
 
 // rawCipher is the wire format from GET /api/ciphers.
 type rawCipher struct {
-	ID   string `json:"Id"`
-	Type int    `json:"Type"` // 1=login, 2=secure note, 3=card, 4=identity
-	Name string `json:"Name"`
+	ID    string `json:"Id"`
+	Type  int    `json:"Type"` // 1=login, 2=secure note, 3=card, 4=identity
+	Name  string `json:"Name"`
 	Login *struct {
 		Username string `json:"Username"`
 		Password string `json:"Password"`
@@ -71,7 +71,7 @@ func (c *Client) Search(query string) ([]Item, error) {
 			}
 		}
 
-		if q == "" || strings.Contains(strings.ToLower(name), q) || urisContain(uris, q) {
+		if q == "" || strings.Contains(strings.ToLower(name), q) || strings.Contains(strings.ToLower(username), q) || urisContain(uris, q) {
 			results = append(results, Item{
 				ID:       r.ID,
 				Name:     name,
@@ -122,10 +122,10 @@ type cipherWriteRequest struct {
 }
 
 type loginWriteRequest struct {
-	Username string             `json:"username"`
-	Password string             `json:"password"`
-	URIs     []uriWriteRequest  `json:"uris"`
-	TOTP     *string            `json:"totp"`
+	Username string            `json:"username"`
+	Password string            `json:"password"`
+	URIs     []uriWriteRequest `json:"uris"`
+	TOTP     *string           `json:"totp"`
 }
 
 type uriWriteRequest struct {
