@@ -85,6 +85,26 @@ func vaultClient() (*vault.Client, error) {
 	return c, nil
 }
 
+// withVault runs fn with the vault client, automatically re-authenticating
+// and retrying once if the Vaultwarden session has expired (ErrUnauthorized).
+func withVault(fn func(*vault.Client) error) error {
+	c, err := vaultClient()
+	if err != nil {
+		return err
+	}
+	err = fn(c)
+	if !errors.Is(err, vault.ErrUnauthorized) {
+		return err
+	}
+	log.Printf("vault: session expired, re-authenticating...")
+	defaultVault = nil
+	c, err = vaultClient()
+	if err != nil {
+		return err
+	}
+	return fn(c)
+}
+
 func ensureDefaultIndex() {
 	if defaultIndex != nil {
 		return
@@ -288,28 +308,6 @@ var toolsList = []map[string]any{
 					"type":        "string",
 					"enum":        []string{"dialog", "clipboard"},
 					"description": "How to obtain the new password when update_password=true. \"dialog\" (default) pops a native GUI input; \"clipboard\" reads the current clipboard.",
-				},
-			},
-			"required": []string{"id"},
-		},
-	},
-	{
-		"name": "vault_copy",
-		"description": "Copy a vault item's password to the user's clipboard for a limited time. " +
-			"The password never enters the conversation; only metadata is returned. " +
-			"Use vault_search first to get the item id.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"id": map[string]any{
-					"type":        "string",
-					"description": "Item ID from vault_search.",
-				},
-				"ttl_seconds": map[string]any{
-					"type":        "integer",
-					"description": fmt.Sprintf("Seconds before the clipboard is restored (default %d, max %d).", defaultCopyTTLSeconds, maxCopyTTLSeconds),
-					"minimum":     1,
-					"maximum":     maxCopyTTLSeconds,
 				},
 			},
 			"required": []string{"id"},
@@ -604,13 +602,12 @@ func handleVaultSearch(id any, raw json.RawMessage) response {
 		}
 	}
 
-	vc, err := vaultClient()
-	if err != nil {
-		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
-	}
-
-	items, err := vc.Search(args.Query)
-	if err != nil {
+	var items []vault.Item
+	if err := withVault(func(vc *vault.Client) error {
+		var e error
+		items, e = vc.Search(args.Query)
+		return e
+	}); err != nil {
 		return toolErrResp(id, fmt.Sprintf("vault search: %v", err))
 	}
 
@@ -683,13 +680,12 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 		return toolErrResp(id, err.Error())
 	}
 
-	vc, err := vaultClient()
-	if err != nil {
-		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
-	}
-
-	newID, err := vc.Add(args.Name, args.Username, password, args.URIs)
-	if err != nil {
+	var newID string
+	if err := withVault(func(vc *vault.Client) error {
+		var e error
+		newID, e = vc.Add(args.Name, args.Username, password, args.URIs)
+		return e
+	}); err != nil {
 		return toolErrResp(id, fmt.Sprintf("vault add: %v", err))
 	}
 
@@ -733,13 +729,10 @@ func handleVaultUpdate(id any, raw json.RawMessage) response {
 		}
 	}
 
-	vc, err := vaultClient()
-	if err != nil {
-		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
-	}
-
 	updateURIs := args.URIs != nil
-	if err := vc.Update(args.ID, args.Name, args.Username, password, args.URIs, updateURIs); err != nil {
+	if err := withVault(func(vc *vault.Client) error {
+		return vc.Update(args.ID, args.Name, args.Username, password, args.URIs, updateURIs)
+	}); err != nil {
 		return toolErrResp(id, fmt.Sprintf("vault update: %v", err))
 	}
 
@@ -787,13 +780,12 @@ func handleVaultCopy(id any, raw json.RawMessage) response {
 		ttlSeconds = maxCopyTTLSeconds
 	}
 
-	vc, err := vaultClient()
-	if err != nil {
-		return toolErrResp(id, fmt.Sprintf("vault unavailable: %v", err))
-	}
-
-	secret, err := vc.Secret(args.ID)
-	if err != nil {
+	var secret string
+	if err := withVault(func(vc *vault.Client) error {
+		var e error
+		secret, e = vc.Secret(args.ID)
+		return e
+	}); err != nil {
 		return toolErrResp(id, fmt.Sprintf("vault get secret: %v", err))
 	}
 
