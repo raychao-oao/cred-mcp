@@ -18,38 +18,57 @@ type Config struct {
 
 // DefaultConfig loads config from env vars with keychain fallback.
 //
-// Required env vars (or keychain stash keys):
-//   - VAULTWARDEN_URL              / stash: vaultwarden-url
-//   - VAULTWARDEN_EMAIL            / stash: vaultwarden-email
-//   - VAULTWARDEN_CF_CLIENT_ID     / stash: vaultwarden-cf-client-id
-//   - VAULTWARDEN_CF_CLIENT_SECRET / stash: vaultwarden-cf-client-secret
+// Primary env vars (preferred):
+//   - CRED_MCP_VAULT_URL
+//   - CRED_MCP_VAULT_EMAIL
+//   - CRED_MCP_VAULT_CF_CLIENT_ID
+//   - CRED_MCP_VAULT_CF_CLIENT_SECRET
+//   - CRED_MCP_VAULT_MASTER_STASH_KEY  (optional, default: "vaultwarden-master")
 //
-// Optional env vars:
-//   - VAULTWARDEN_MASTER_STASH_KEY: keychain key holding the master password
-//     (default: "vaultwarden-master")
+// Legacy fallbacks (still accepted, lower priority):
+//   - VAULTWARDEN_URL, VAULTWARDEN_EMAIL, VAULTWARDEN_CF_CLIENT_ID,
+//     VAULTWARDEN_CF_CLIENT_SECRET, VAULTWARDEN_MASTER_STASH_KEY
+//
+// Keychain stash fallbacks (lowest priority):
+//   - vaultwarden-url, vaultwarden-email, vaultwarden-cf-client-id,
+//     vaultwarden-cf-client-secret
 func DefaultConfig() (Config, error) {
-	masterKey := os.Getenv("VAULTWARDEN_MASTER_STASH_KEY")
+	masterKey := firstEnv("CRED_MCP_VAULT_MASTER_STASH_KEY", "VAULTWARDEN_MASTER_STASH_KEY")
 	if masterKey == "" {
 		masterKey = "vaultwarden-master"
 	}
 	cfg := Config{
-		BaseURL:        envOrStash("VAULTWARDEN_URL", "vaultwarden-url"),
-		Email:          envOrStash("VAULTWARDEN_EMAIL", "vaultwarden-email"),
-		CFClientID:     envOrStash("VAULTWARDEN_CF_CLIENT_ID", "vaultwarden-cf-client-id"),
-		CFClientSecret: envOrStash("VAULTWARDEN_CF_CLIENT_SECRET", "vaultwarden-cf-client-secret"),
+		BaseURL:        envOrStash("CRED_MCP_VAULT_URL", "VAULTWARDEN_URL", "vaultwarden-url"),
+		Email:          envOrStash("CRED_MCP_VAULT_EMAIL", "VAULTWARDEN_EMAIL", "vaultwarden-email"),
+		CFClientID:     envOrStash("CRED_MCP_VAULT_CF_CLIENT_ID", "VAULTWARDEN_CF_CLIENT_ID", "vaultwarden-cf-client-id"),
+		CFClientSecret: envOrStash("CRED_MCP_VAULT_CF_CLIENT_SECRET", "VAULTWARDEN_CF_CLIENT_SECRET", "vaultwarden-cf-client-secret"),
 		MasterStashKey: masterKey,
 	}
 	if cfg.BaseURL == "" {
-		return Config{}, fmt.Errorf("Vaultwarden URL not configured (set VAULTWARDEN_URL or stash vaultwarden-url)")
+		return Config{}, fmt.Errorf("vault URL not configured (set CRED_MCP_VAULT_URL)")
 	}
 	if cfg.Email == "" {
-		return Config{}, fmt.Errorf("Vaultwarden email not configured (set VAULTWARDEN_EMAIL or stash vaultwarden-email)")
+		return Config{}, fmt.Errorf("vault email not configured (set CRED_MCP_VAULT_EMAIL)")
 	}
 	return cfg, nil
 }
 
-func envOrStash(envKey, stashKey string) string {
-	if v := os.Getenv(envKey); v != "" {
+// firstEnv returns the value of the first non-empty env var in the list.
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// envOrStash tries each env key in order, then falls back to a keychain stash lookup.
+func envOrStash(primaryEnv, legacyEnv, stashKey string) string {
+	if v := os.Getenv(primaryEnv); v != "" {
+		return v
+	}
+	if v := os.Getenv(legacyEnv); v != "" {
 		return v
 	}
 	v, _ := keychain.Get(stashKey)

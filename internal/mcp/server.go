@@ -594,8 +594,19 @@ func handleVaultSearch(id any, raw json.RawMessage) response {
 
 // readPassword obtains a secret via dialog (default) or clipboard.
 // source="" or "dialog" → native GUI prompt; "clipboard" → current clipboard.
+// Any other value is rejected.
 func readPassword(source, prompt string) (string, error) {
-	if source == "clipboard" {
+	switch source {
+	case "", "dialog":
+		val, err := dialog.ReadSecret(prompt)
+		if err != nil {
+			return "", fmt.Errorf("dialog error: %v", err)
+		}
+		if val == "" {
+			return "", fmt.Errorf("no password entered")
+		}
+		return val, nil
+	case "clipboard":
 		val, err := clipboard.Read()
 		if err != nil {
 			return "", fmt.Errorf("clipboard error: %v", err)
@@ -604,16 +615,9 @@ func readPassword(source, prompt string) (string, error) {
 			return "", fmt.Errorf("clipboard is empty — ask the user to copy the password first")
 		}
 		return val, nil
+	default:
+		return "", fmt.Errorf("unknown password_source %q: must be \"dialog\" or \"clipboard\"", source)
 	}
-	// default: dialog
-	val, err := dialog.ReadSecret(prompt)
-	if err != nil {
-		return "", fmt.Errorf("dialog error: %v", err)
-	}
-	if val == "" {
-		return "", fmt.Errorf("no password entered")
-	}
-	return val, nil
 }
 
 type vaultAddArgs struct {
@@ -655,7 +659,8 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 		"username": args.Username,
 		"uris":     args.URIs,
 		"status":   "created",
-		"note":     "Password was read from clipboard and stored encrypted. It never entered the conversation.",
+		"note":            "Password stored encrypted. It never entered the conversation.",
+			"password_source": args.PasswordSource,
 	})
 }
 

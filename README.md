@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.1.3` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
+**Status**: `v0.2.0` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
 
 ## What it does
 
@@ -21,7 +21,7 @@ Later, you ask AI: "I'm SSHing into prod, get me the password"
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
 ```
 
-## Tools (`v0.1.3`)
+## Tools (`v0.2.0`)
 
 | Tool | Purpose |
 |------|---------|
@@ -31,7 +31,9 @@ You paste into the SSH prompt; clipboard auto-restores after the TTL.
 | `delete_stash` | Remove a stored secret by `name`. |
 | `list_stash` | List metadata for all stored secrets (`name`, `source`, `created_at`). Values are never returned. Useful for migration: see what has already been moved into safe storage. |
 | `vault_search` | Search your Vaultwarden vault by name, username, or URI. Returns item metadata (never passwords). |
-| `vault_copy` | Copy a vault item field (password, TOTP, custom field) to the clipboard with a TTL. |
+| `vault_copy` | Copy a vault item's login password to the clipboard with a TTL. |
+| `vault_add` | Add a new login item to the vault. Password sourced via `"dialog"` (native GUI, default) or `"clipboard"` — never via the chat. |
+| `vault_update` | Update fields on an existing vault item (name, username, URIs). Password update uses the same `"dialog"` / `"clipboard"` sources as `vault_add`. |
 
 All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`, `source`, `created_at`). The value is never serialized into the response or stderr logs.
 
@@ -85,7 +87,17 @@ Plaintext is read from stdin, never from argv (no shell history leak).
 - **Plaintext never enters LLM context.** Tool responses and stderr logs carry only metadata (`name`, `status`, `note`, `ttl_seconds`). The clipboard is the side channel for the human user.
 - **Biometric / passcode gating** (macOS only currently). The first secret-touching tool call after process start prompts Touch ID via `LAPolicyDeviceOwnerAuthentication` — Touch ID failure / absence falls back to the system password automatically. The prompt is OS-mediated and does not require a Cocoa event loop, so it works for a stdio-based MCP server. **Windows / Linux are not yet implemented**: those builds compile against a stub that grants unlock without prompting (effectively the pre-feat/biometric AutoUnlock policy). Per-platform support will land in follow-up branches; until then, only macOS gets a real challenge.
 - **Session expiry: idle 30 min / absolute 8 hr.** The first secret-touching tool call after process start triggers the unlock prompt; activity refreshes the idle timer. Once either TTL fires, the session enters Expired state — the next call re-runs the unlock policy (Touch ID / passcode prompt). On success, the session resumes with fresh timers. On user cancel / decline, the call is denied and state stays Expired (subsequent calls re-prompt). `ping` always bypasses the gate (health check). State does not persist across restarts.
-- **Vault integration** (Vaultwarden / Bitwarden). `vault_search` and `vault_copy` connect to a self-hosted Vaultwarden instance. The master password is pulled from the OS keychain (never typed into the chat). Configure via `CRED_MCP_VAULT_URL`, `CRED_MCP_VAULT_USER`, and `CRED_MCP_VAULT_KEYCHAIN_ACCOUNT` environment variables in your `.mcp.json`.
+- **Vault integration** (Vaultwarden / Bitwarden). `vault_search` and `vault_copy` connect to a self-hosted Vaultwarden instance. The master password is pulled from the OS keychain (never typed into the chat). Configure via environment variables in your `.mcp.json`:
+
+  | Variable | Purpose |
+  |----------|---------|
+  | `CRED_MCP_VAULT_URL` | Vaultwarden base URL |
+  | `CRED_MCP_VAULT_EMAIL` | Vaultwarden account email |
+  | `CRED_MCP_VAULT_CF_CLIENT_ID` | Cloudflare Access client ID (if vault is behind CF Access) |
+  | `CRED_MCP_VAULT_CF_CLIENT_SECRET` | Cloudflare Access client secret |
+  | `CRED_MCP_VAULT_MASTER_STASH_KEY` | Keychain key holding the master password (default: `vaultwarden-master`) |
+
+  Legacy `VAULTWARDEN_*` names are accepted as fallbacks for backward compatibility.
 - **Cross-device sync is out of scope.** Each device's keychain is independent — this is intentional, not a bug. Vaultwarden handles human-side sync; cred-mcp handles per-device AI-side access.
 
 ## Plugin packaging
