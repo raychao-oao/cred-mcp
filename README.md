@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.1.3` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to v0.2.0.
+**Status**: `v0.2.0` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
 
 ## What it does
 
@@ -21,7 +21,7 @@ Later, you ask AI: "I'm SSHing into prod, get me the password"
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
 ```
 
-## Tools (`v0.1.3`)
+## Tools (`v0.2.0`)
 
 | Tool | Purpose |
 |------|---------|
@@ -32,6 +32,8 @@ You paste into the SSH prompt; clipboard auto-restores after the TTL.
 | `list_stash` | List metadata for all stored secrets (`name`, `source`, `created_at`). Values are never returned. Useful for migration: see what has already been moved into safe storage. |
 | `vault_search` | Search your Vaultwarden vault by name, username, or URI. Returns item metadata (never passwords). |
 | `vault_copy` | Copy a vault item field (password, TOTP, custom field) to the clipboard with a TTL. |
+| `vault_add` | Add a new login item to the vault. Password can be provided via clipboard (`password_source=clipboard`) or a native GUI dialog (`password_source=dialog`) — never via the chat. |
+| `vault_update` | Update fields on an existing vault item (username, URI, notes). Password update uses the same clipboard/dialog sources as `vault_add`. |
 
 All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`, `source`, `created_at`). The value is never serialized into the response or stderr logs.
 
