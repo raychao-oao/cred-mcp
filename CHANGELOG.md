@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-05-19
+
+### Fixed
+- Plugin update no longer leaves the MCP server broken: `.mcp.json` now points to `scripts/run.sh`, a wrapper that auto-downloads the binary via `install.sh` if it is missing. `plugin update` skips `install.sh`, so without this wrapper every update broke the server on next launch.
+
 ## [0.3.0] - 2026-05-19
 
 ### Added
