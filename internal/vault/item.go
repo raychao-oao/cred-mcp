@@ -71,7 +71,7 @@ func (c *Client) Search(query string) ([]Item, error) {
 			}
 		}
 
-		if q == "" || strings.Contains(strings.ToLower(name), q) || urisContain(uris, q) {
+		if q == "" || strings.Contains(strings.ToLower(name), q) || strings.Contains(strings.ToLower(username), q) || urisContain(uris, q) {
 			results = append(results, Item{
 				ID:       r.ID,
 				Name:     name,

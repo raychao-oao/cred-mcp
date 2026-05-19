@@ -148,7 +148,7 @@ var toolsList = []map[string]any{
 		},
 	},
 	{
-		"name": "delete_stash",
+		"name":        "delete_stash",
 		"description": "Delete a stored secret by name. Returns an error if no entry exists with that name.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -637,6 +637,9 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 	if strings.TrimSpace(args.Name) == "" {
 		return toolErrResp(id, "name is required")
 	}
+	if args.PasswordSource == "" {
+		args.PasswordSource = "dialog"
+	}
 
 	password, err := readPassword(args.PasswordSource, fmt.Sprintf("Password for %q", args.Name))
 	if err != nil {
@@ -654,13 +657,13 @@ func handleVaultAdd(id any, raw json.RawMessage) response {
 	}
 
 	return okResp(id, map[string]any{
-		"id":       newID,
-		"name":     args.Name,
-		"username": args.Username,
-		"uris":     args.URIs,
-		"status":   "created",
+		"id":              newID,
+		"name":            args.Name,
+		"username":        args.Username,
+		"uris":            args.URIs,
+		"status":          "created",
 		"note":            "Password stored encrypted. It never entered the conversation.",
-			"password_source": args.PasswordSource,
+		"password_source": args.PasswordSource,
 	})
 }
 

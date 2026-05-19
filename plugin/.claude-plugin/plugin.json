@@ -1,6 +1,6 @@
 {
   "name": "cred-mcp",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Credential management MCP server — store secrets in your OS keychain and Vaultwarden vault, hand them to AI workflows without ever putting plaintext into the LLM context.",
   "author": {
     "name": "raychao-oao",
