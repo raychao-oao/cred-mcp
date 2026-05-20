@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-05-20
+
+### Added
+- Plugin skill (`plugin/skills/cred-mcp/`) teaching Claude when and how to use cred-mcp tools securely — vault search/copy, stash operations, pty-mcp integration patterns, and security constraints.
+
 ## [0.3.2] - 2026-05-19
 
 ### Fixed
