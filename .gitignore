@@ -34,6 +34,9 @@ config.local.*
 CLAUDE.md
 CLAUDE.local.md
 docs/ai_collaboration/
+docs/*.png
+docs/*.jpg
+SHA256SUMS
 
 # Plugin assets that should be tracked are under plugin/
 !plugin/
