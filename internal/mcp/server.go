@@ -313,6 +313,75 @@ var toolsList = []map[string]any{
 			"required": []string{"id"},
 		},
 	},
+	{
+		// SEALED CREDENTIAL tools (AI-native PAM protocol)
+		"name": "request_authorization",
+		"description": "SEALED: Request biometric authorization for a consumer MCP to access a vault item. " +
+			"Call this before vault_seal when a consumer MCP (e.g. pty-mcp, imap-mcp) needs a credential delivered securely. " +
+			"If the registry requires it, triggers a biometric prompt (Touch ID / Windows Hello) on the user's device. " +
+			"Returns a single-use auth_token valid for ttl_seconds. " +
+			"The token is not a secret — it is bound to (item_id, consumer_id, purpose) and useless without the matching vault_seal call.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"item_id": map[string]any{
+					"type":        "string",
+					"description": "Vault item ID (from vault_search) to authorize access to.",
+				},
+				"consumer_id": map[string]any{
+					"type":        "string",
+					"description": "Registered consumer MCP ID (e.g. \"pty-mcp\", \"imap-mcp\").",
+				},
+				"purpose": map[string]any{
+					"type":        "string",
+					"description": "Short label describing why the credential is needed (e.g. \"ssh-login\", \"imap-login\"). Must match an allowed_purpose in the registry.",
+				},
+				"ttl_seconds": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("How long the auth token stays valid (default %d s, max %d s).", defaultAuthzTTLSeconds, maxAuthzTTLSeconds),
+					"minimum":     1,
+					"maximum":     maxAuthzTTLSeconds,
+				},
+			},
+			"required": []string{"item_id", "consumer_id", "purpose"},
+		},
+	},
+	{
+		"name": "vault_seal",
+		"description": "SEALED: Encrypt a vault item's secret directly into a consumer MCP's session key using HPKE. " +
+			"The AI carries only opaque ciphertext — the plaintext never enters the LLM context. " +
+			"Call request_authorization first to obtain auth_token. " +
+			"Call the consumer MCP's get_credential_bundle tool to get consumer_bundle. " +
+			"Returns a sealed_box that the consumer MCP decrypts autonomously via its SDK.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"item_id": map[string]any{
+					"type":        "string",
+					"description": "Vault item ID to seal (same as used in request_authorization).",
+				},
+				"consumer_bundle": map[string]any{
+					"type":        "object",
+					"description": "ConsumerBundle JSON from the consumer MCP's get_credential_bundle tool.",
+				},
+				"auth_token": map[string]any{
+					"type":        "string",
+					"description": "Single-use token from request_authorization.",
+				},
+				"purpose": map[string]any{
+					"type":        "string",
+					"description": "Purpose label — must match the value used in request_authorization.",
+				},
+				"box_ttl_seconds": map[string]any{
+					"type":        "integer",
+					"description": fmt.Sprintf("How long the sealed box stays valid (default %d s, max %d s).", defaultBoxTTLSeconds, maxBoxTTLSeconds),
+					"minimum":     1,
+					"maximum":     maxBoxTTLSeconds,
+				},
+			},
+			"required": []string{"item_id", "consumer_bundle", "auth_token", "purpose"},
+		},
+	},
 }
 
 // Serve runs the JSON-RPC stdio loop. version is reported via initialize.
@@ -408,6 +477,10 @@ func handleToolCall(req *request, version string) response {
 		return handleVaultUpdate(req.ID, p.Arguments)
 	case "vault_copy":
 		return handleVaultCopy(req.ID, p.Arguments)
+	case "request_authorization":
+		return handleRequestAuthorization(req.ID, p.Arguments)
+	case "vault_seal":
+		return handleVaultSeal(req.ID, p.Arguments)
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-05-21
+
+### Added
+- **AI-native PAM protocol** — HPKE-based sealed credential delivery: AI acts as untrusted transport; plaintext never enters LLM context.
+  - `internal/seal`: HPKE seal package (`DHKEM-X25519` + `HKDF-SHA256` + `ChaCha20Poly1305`) via Go stdlib `crypto/hpke`
+  - `internal/registry`: consumer registry YAML loader + ACL check (glob-pattern item/purpose matching, `auto` / `required` approval modes)
+  - `internal/authz`: single-use auth token store with TTL and `(item, consumer, purpose)` binding validation
+  - `request_authorization` MCP tool — checks registry ACL, triggers biometric if `approval_mode: required`, issues a single-use auth token
+  - `vault_seal` MCP tool — verifies ConsumerBundle identity key against registry, consumes auth token, fetches plaintext from vault, seals with HPKE, returns SealedBox; `box_id` generated server-side to prevent replay
+  - `internal/e2e`: full in-process E2E smoke test covering bundle generation, ACL check, token lifecycle, HPKE seal, JSON round-trip, Open, and single-use enforcement
+
 ## [0.3.3] - 2026-05-20
 
 ### Added
