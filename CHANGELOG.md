@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-05-21
+
+### Fixed
+- `install.sh` VERSION was not bumped during v0.4.0 release, causing the version-check logic to always download the stale v0.3.3 binary instead of upgrading. Plugin `update` command now correctly installs the new binary on next launch.
+
 ## [0.4.0] - 2026-05-21
 
 ### Added
