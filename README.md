@@ -61,9 +61,9 @@ consumers:
     approval_mode: auto               # "auto" or "required" (biometric)
 ```
 
-**Step 3 — restart cred-mcp**
+**Step 3 — verify**
 
-The registry is read once at startup. If you create or update `registry.yaml` while cred-mcp is already running, restart it (or run `pkill -f cred-mcp`; Claude Code will re-launch it automatically).
+The registry is loaded on first use and cached in memory. If cred-mcp was already running when you created the file, the next tool call will pick it up automatically — no restart needed. If you **update** an existing registry file, restart cred-mcp to reload it (`pkill -f cred-mcp`; Claude Code re-launches it automatically).
 
 ## Tools (`v0.4.1`)
 
