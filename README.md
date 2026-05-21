@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.2.0` — early release. Stash tools (OS keychain) and vault tools (Vaultwarden) are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
+**Status**: `v0.4.1` — Stash, vault, and AI-native PAM protocol tools are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
 
 ## What it does
 
@@ -21,7 +21,51 @@ Later, you ask AI: "I'm SSHing into prod, get me the password"
 You paste into the SSH prompt; clipboard auto-restores after the TTL.
 ```
 
-## Tools (`v0.2.0`)
+## AI-native credential delivery (v0.4.0)
+
+The PAM protocol lets cred-mcp hand a vault secret directly to a consumer MCP (e.g. pty-mcp) **without the plaintext ever passing through the AI**. The AI acts as an untrusted courier carrying only public keys and ciphertext.
+
+```
+pty-mcp.get_credential_bundle()  →  ConsumerBundle (public keys only, safe for AI)
+cred-mcp.request_authorization() →  auth_token (single-use, binds item + consumer + purpose)
+cred-mcp.vault_seal(bundle, auth_token) → SealedBox (HPKE ciphertext)
+pty-mcp.inject_secret(sealed_box) → decrypt → write to PTY → zeroize memory
+```
+
+The consumer (pty-mcp) holds the private session key; cred-mcp never sees it. cred-mcp encrypts with the consumer's ephemeral X25519 public key so only that specific session can decrypt. Plaintext never enters any log, response, or LLM context.
+
+### Consumer registry setup
+
+`request_authorization` and `vault_seal` check a YAML registry to verify that the consumer is known and allowed to request the given item and purpose.
+
+**Step 1 — get the consumer's identity key**
+
+Ask the AI to run `get_credential_bundle` on pty-mcp, then convert the `identity_pub_key` field from base64 to hex:
+
+```bash
+echo "<identity_pub_key from bundle>" | base64 -d | xxd -p | tr -d '\n'
+```
+
+**Step 2 — create the registry file**
+
+Copy `registry.yaml.example` from the repo to `~/.config/cred-mcp/registry.yaml` (or set `CRED_MCP_REGISTRY` to a custom path) and fill in the hex key:
+
+```yaml
+consumers:
+  pty-mcp:
+    identity_pub_key: "b519ada7..."   # hex from step 1
+    allowed_items:
+      - "*"                           # or list specific vault item UUIDs
+    allowed_purposes:
+      - "ssh-login"
+    approval_mode: auto               # "auto" or "required" (biometric)
+```
+
+**Step 3 — verify**
+
+The registry is loaded on first use and cached in memory. If cred-mcp was already running when you created the file, the next tool call will pick it up automatically — no restart needed. If you **update** an existing registry file, restart cred-mcp to reload it (`pkill -f cred-mcp`; Claude Code re-launches it automatically).
+
+## Tools (`v0.4.1`)
 
 | Tool | Purpose |
 |------|---------|
@@ -34,6 +78,8 @@ You paste into the SSH prompt; clipboard auto-restores after the TTL.
 | `vault_copy` | Copy a vault item's login password to the clipboard with a TTL. |
 | `vault_add` | Add a new login item to the vault. Password sourced via `"dialog"` (native GUI, default) or `"clipboard"` — never via the chat. |
 | `vault_update` | Update fields on an existing vault item (name, username, URIs). Password update uses the same `"dialog"` / `"clipboard"` sources as `vault_add`. |
+| `request_authorization` | Check consumer registry ACL and issue a single-use auth token bound to `(item_id, consumer_id, purpose)`. Triggers biometric prompt if `approval_mode: required`. |
+| `vault_seal` | Verify the consumer bundle, consume the auth token, fetch plaintext from vault, HPKE-encrypt it for the consumer's session key, return a `SealedBox`. Plaintext never leaves cred-mcp. |
 
 All tools that touch secrets return only metadata (`name`, `status`, `note`, `ttl_seconds`, `source`, `created_at`). The value is never serialized into the response or stderr logs.
 

@@ -1,0 +1,32 @@
+# cred-mcp consumer registry
+#
+# Copy to ~/.config/cred-mcp/registry.yaml (or set CRED_MCP_REGISTRY env var).
+#
+# Each consumer entry requires:
+#   identity_pub_key  — hex-encoded Ed25519 public key from pty-mcp's get_credential_bundle
+#   allowed_items     — list of vault item IDs, or ["*"] to allow all
+#   allowed_purposes  — list of purpose labels the consumer may request
+#   approval_mode     — "auto" (no prompt) or "required" (biometric/dialog on every request)
+
+consumers:
+  pty-mcp:
+    # identity_pub_key: run get_credential_bundle on pty-mcp, then base64-decode
+    # the identity_pub_key field and hex-encode it.
+    # Example: echo "<base64>" | base64 -d | xxd -p | tr -d '\n'
+    identity_pub_key: "replace_with_hex_encoded_ed25519_pubkey"
+    allowed_items:
+      - "*"           # allow all vault items; or list specific UUIDs
+    allowed_purposes:
+      - "ssh-login"
+      - "imap-login"
+      - "api-key"
+    approval_mode: auto   # "auto" or "required"
+
+  # Add more consumers as needed:
+  # imap-mcp:
+  #   identity_pub_key: "..."
+  #   allowed_items:
+  #     - "item-uuid-for-email-account"
+  #   allowed_purposes:
+  #     - "imap-login"
+  #   approval_mode: required

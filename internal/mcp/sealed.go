@@ -30,31 +30,44 @@ const (
 var defaultAuthzStore = authz.NewStore()
 
 var (
-	registryOnce sync.Once
-	defaultReg   *registry.Registry
-	defaultRegErr error
+	registryMu sync.RWMutex
+	defaultReg *registry.Registry
 )
 
+// loadRegistry loads and caches the consumer registry on first success.
+// Errors are not cached: if the file is missing at startup it will be
+// re-tried on every call so users don't need to restart cred-mcp after
+// creating the registry file for the first time.
 func loadRegistry() (*registry.Registry, error) {
-	registryOnce.Do(func() {
-		path := os.Getenv("CRED_MCP_REGISTRY")
-		if path == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				defaultRegErr = fmt.Errorf("registry: cannot find home dir: %w", err)
-				return
-			}
-			path = filepath.Join(home, ".config", "cred-mcp", "registry.yaml")
-		}
-		reg, err := registry.Load(path)
+	registryMu.RLock()
+	if defaultReg != nil {
+		r := defaultReg
+		registryMu.RUnlock()
+		return r, nil
+	}
+	registryMu.RUnlock()
+
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if defaultReg != nil { // re-check after acquiring write lock
+		return defaultReg, nil
+	}
+
+	path := os.Getenv("CRED_MCP_REGISTRY")
+	if path == "" {
+		home, err := os.UserHomeDir()
 		if err != nil {
-			defaultRegErr = fmt.Errorf("registry: %w", err)
-			return
+			return nil, fmt.Errorf("registry: cannot find home dir: %w", err)
 		}
-		defaultReg = reg
-		log.Printf("registry: loaded from %s", path)
-	})
-	return defaultReg, defaultRegErr
+		path = filepath.Join(home, ".config", "cred-mcp", "registry.yaml")
+	}
+	reg, err := registry.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("registry: %w", err)
+	}
+	defaultReg = reg
+	log.Printf("registry: loaded from %s", path)
+	return defaultReg, nil
 }
 
 // --- request_authorization ---

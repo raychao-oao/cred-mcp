@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-05-21
+
+### Fixed
+- Consumer registry is no longer cached on load failure. Previously, if `registry.yaml` was missing at startup, the `"registry unavailable"` error was cached forever via `sync.Once` and cred-mcp had to be restarted. Now errors are not cached; the file is re-tried on the next `request_authorization` or `vault_seal` call.
+
 ## [0.4.1] - 2026-05-21
 
 ### Fixed
