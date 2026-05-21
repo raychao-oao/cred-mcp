@@ -2,7 +2,7 @@
 
 > Credential management MCP server for AI agents — store secrets in your OS keychain, hand them to AI workflows without ever putting plaintext into the LLM context.
 
-**Status**: `v0.4.1` — Stash, vault, and AI-native PAM protocol tools are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
+**Status**: `v0.4.2` — Stash, vault, and AI-native PAM protocol tools are stable. Biometric re-unlock (Touch ID / Windows Hello gating) is deferred to a future release.
 
 ## What it does
 
@@ -65,7 +65,7 @@ consumers:
 
 The registry is loaded on first use and cached in memory. If cred-mcp was already running when you created the file, the next tool call will pick it up automatically — no restart needed. If you **update** an existing registry file, restart cred-mcp to reload it (`pkill -f cred-mcp`; Claude Code re-launches it automatically).
 
-## Tools (`v0.4.1`)
+## Tools (`v0.4.2`)
 
 | Tool | Purpose |
 |------|---------|
