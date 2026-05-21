@@ -4,10 +4,11 @@ go 1.26.1
 
 require (
 	github.com/atotto/clipboard v0.1.4
-	github.com/raychao-oao/cred-proto v0.0.0
+	github.com/raychao-oao/cred-proto v0.0.0-20260521135606-b90f1d35c458
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.51.0
 	golang.org/x/term v0.43.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
