@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/raychao-oao/cred-mcp/cmd/dev"
 	"github.com/raychao-oao/cred-mcp/internal/biometric"
@@ -49,9 +50,23 @@ func main() {
 	// place that knows whether we have a real OS challenge or a stub.
 	// Available() checks capability without prompting; the actual prompt fires
 	// lazily on the first secret-touching tool call via session.Touch().
+	//
+	// CRED_MCP_UNLOCK overrides the default policy:
+	//   (unset)                        use biometric if available, else AutoUnlock
+	//   auto | off | none | disabled   always AutoUnlock (headless / automation)
+	//   biometric | required | hello   always biometric; fail if unavailable
 	unlockPolicy := session.AutoUnlock
-	if biometric.Available() {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CRED_MCP_UNLOCK"))) {
+	case "auto", "off", "none", "disabled":
+		// headless/automation mode — skip biometric prompt entirely
+	case "biometric", "required", "hello":
+		// force biometric regardless of environment (will fail in headless)
 		unlockPolicy = biometric.Unlock
+	default:
+		// default: use biometric when the platform supports it
+		if biometric.Available() {
+			unlockPolicy = biometric.Unlock
+		}
 	}
 	session.Default = session.New(session.DefaultIdleTTL, session.DefaultAbsoluteTTL, unlockPolicy)
 

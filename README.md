@@ -132,6 +132,18 @@ Plaintext is read from stdin, never from argv (no shell history leak).
 
 - **Plaintext never enters LLM context.** Tool responses and stderr logs carry only metadata (`name`, `status`, `note`, `ttl_seconds`). The clipboard is the side channel for the human user.
 - **Biometric / passcode gating** (macOS only currently). The first secret-touching tool call after process start prompts Touch ID via `LAPolicyDeviceOwnerAuthentication` — Touch ID failure / absence falls back to the system password automatically. The prompt is OS-mediated and does not require a Cocoa event loop, so it works for a stdio-based MCP server. **Windows / Linux are not yet implemented**: those builds compile against a stub that grants unlock without prompting (effectively the pre-feat/biometric AutoUnlock policy). Per-platform support will land in follow-up branches; until then, only macOS gets a real challenge.
+- **Unlock policy override (`CRED_MCP_UNLOCK`).** For headless or automation environments (WSL2, Codex MCP, CI) where a biometric prompt cannot be completed interactively, set this env var in your `.mcp.json`:
+
+  | Value | Behaviour |
+  |-------|-----------|
+  | _(unset)_ | Use biometric if available, otherwise AutoUnlock |
+  | `auto` / `off` / `none` / `disabled` | Always AutoUnlock — no prompt, suitable for headless AI agents |
+  | `biometric` / `required` / `hello` | Force biometric; fails if unavailable (use for high-security interactive sessions) |
+
+  Example `.mcp.json` entry for WSL2 / Codex:
+  ```json
+  { "env": { "CRED_MCP_UNLOCK": "auto" } }
+  ```
 - **Session expiry: idle 30 min / absolute 8 hr.** The first secret-touching tool call after process start triggers the unlock prompt; activity refreshes the idle timer. Once either TTL fires, the session enters Expired state — the next call re-runs the unlock policy (Touch ID / passcode prompt). On success, the session resumes with fresh timers. On user cancel / decline, the call is denied and state stays Expired (subsequent calls re-prompt). `ping` always bypasses the gate (health check). State does not persist across restarts.
 - **Vault integration** (Vaultwarden / Bitwarden). `vault_search` and `vault_copy` connect to a self-hosted Vaultwarden instance. The master password is pulled from the OS keychain (never typed into the chat). Configure via environment variables in your `.mcp.json`:
 
