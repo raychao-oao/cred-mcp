@@ -127,7 +127,15 @@ func ensureDefaultIndex() {
 //	        Typical flow: vault_search → vault_copy → user pastes.
 //
 // Secret values NEVER appear in tool responses or conversation history.
-var toolsList = []map[string]any{
+// vaultConfigured reports whether a Vaultwarden URL is present in the
+// environment. Checked at startup to decide which tools to advertise.
+// Deliberately avoids touching the OS keychain to prevent chicken-and-egg
+// issues during process initialisation.
+func vaultConfigured() bool {
+	return os.Getenv("CRED_MCP_VAULT_URL") != "" || os.Getenv("VAULTWARDEN_URL") != ""
+}
+
+var baseTools = []map[string]any{
 	{
 		"name":        "ping",
 		"description": "Health check — confirms cred-mcp is running. Call this if the user asks whether cred-mcp is connected, or to get the server version. No credentials are accessed.",
@@ -201,8 +209,10 @@ var toolsList = []map[string]any{
 			"required": []string{"name"},
 		},
 	},
+}
+
+var vaultTools = []map[string]any{
 	{
-		// VAULT tools
 		"name": "vault_search",
 		"description": "VAULT: Search the Vaultwarden credential vault and return matching login items. " +
 			"Call this first whenever the user needs a saved credential — e.g. \"get the password for asablue\", \"find the router login\". " +
@@ -427,7 +437,11 @@ func handle(req *request, version string) response {
 			"serverInfo":      map[string]any{"name": "cred-mcp", "version": version},
 		}}
 	case "tools/list":
-		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": toolsList}}
+		tools := baseTools
+		if vaultConfigured() {
+			tools = append(tools, vaultTools...)
+		}
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": tools}}
 	case "tools/call":
 		return handleToolCall(req, version)
 	case "notifications/initialized", "$/cancelRequest":
@@ -469,21 +483,28 @@ func handleToolCall(req *request, version string) response {
 		return handleDeleteStash(req.ID, p.Arguments)
 	case "list_stash":
 		return handleListStash(req.ID, p.Arguments)
-	case "vault_search":
-		return handleVaultSearch(req.ID, p.Arguments)
-	case "vault_add":
-		return handleVaultAdd(req.ID, p.Arguments)
-	case "vault_update":
-		return handleVaultUpdate(req.ID, p.Arguments)
-	case "vault_copy":
-		return handleVaultCopy(req.ID, p.Arguments)
-	case "request_authorization":
-		return handleRequestAuthorization(req.ID, p.Arguments)
-	case "vault_seal":
-		return handleVaultSeal(req.ID, p.Arguments)
+	case "vault_search", "vault_add", "vault_update", "vault_copy", "request_authorization", "vault_seal":
+		if !vaultConfigured() {
+			return toolErrResp(req.ID, "vault tools are not available: set CRED_MCP_VAULT_URL to enable")
+		}
+		switch p.Name {
+		case "vault_search":
+			return handleVaultSearch(req.ID, p.Arguments)
+		case "vault_add":
+			return handleVaultAdd(req.ID, p.Arguments)
+		case "vault_update":
+			return handleVaultUpdate(req.ID, p.Arguments)
+		case "vault_copy":
+			return handleVaultCopy(req.ID, p.Arguments)
+		case "request_authorization":
+			return handleRequestAuthorization(req.ID, p.Arguments)
+		case "vault_seal":
+			return handleVaultSeal(req.ID, p.Arguments)
+		}
 	default:
 		return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 	}
+	return errResp(req.ID, -32601, fmt.Sprintf("unknown tool: %s", p.Name))
 }
 
 func okResp(id any, result any) response {

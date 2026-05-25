@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-05-25
+
+### Added
+- **Vaultwarden is now optional** — vault tools (`vault_search`, `vault_copy`, `vault_add`, `vault_update`, `request_authorization`, `vault_seal`) are only advertised when `CRED_MCP_VAULT_URL` or `VAULTWARDEN_URL` is set. Without either env var, only stash (5 tools) and `ping` are visible. No Vaultwarden setup required to use cred-mcp for stash-only workflows.
+- Calling a vault tool without a configured URL returns a clear error: `vault tools are not available: set CRED_MCP_VAULT_URL to enable`.
+
 ## [0.4.2] - 2026-05-21
 
 ### Fixed
