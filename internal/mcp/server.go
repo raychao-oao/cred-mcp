@@ -127,12 +127,17 @@ func ensureDefaultIndex() {
 //	        Typical flow: vault_search → vault_copy → user pastes.
 //
 // Secret values NEVER appear in tool responses or conversation history.
-// vaultConfigured reports whether a Vaultwarden URL is present in the
-// environment. Checked at startup to decide which tools to advertise.
-// Deliberately avoids touching the OS keychain to prevent chicken-and-egg
-// issues during process initialisation.
+// vaultConfigured reports whether a Vaultwarden URL is discoverable.
+// Checks env vars first, then the keychain stash (where the setup wizard
+// stores vaultwarden-url). Reading the URL is safe at startup: go-keyring
+// stores items without biometric ACLs, so no prompt is triggered; if the
+// keychain is locked the read fails silently and we return false.
 func vaultConfigured() bool {
-	return os.Getenv("CRED_MCP_VAULT_URL") != "" || os.Getenv("VAULTWARDEN_URL") != ""
+	if os.Getenv("CRED_MCP_VAULT_URL") != "" || os.Getenv("VAULTWARDEN_URL") != "" {
+		return true
+	}
+	v, _ := keychain.Get("vaultwarden-url")
+	return v != ""
 }
 
 var baseTools = []map[string]any{
