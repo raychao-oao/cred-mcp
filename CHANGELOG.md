@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.5] - 2026-05-25
+
+### Fixed
+- `vaultConfigured()` now also checks the keychain stash (`vaultwarden-url`) in addition to env vars. Previously, if the Vaultwarden URL was stored via the setup wizard (keychain stash) rather than an env var, vault tools would not appear even when Vaultwarden was configured. Reading the URL from keychain does not trigger biometric prompts.
+
 ## [0.4.4] - 2026-05-25
 
 ### Added
