@@ -1,0 +1,42 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    name: Vet and test
+    # macos-latest matches the release runner: the cgo + LocalAuthentication
+    # (Touch ID) path compiles, and pbcopy/pbpaste exist for the clipboard
+    # package. (ubuntu would need xclip plus a display server.)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+  cross-build:
+    name: Cross-compile (CGO_ENABLED=0 stub)
+    # Catch breakage of the non-cgo biometric stub used by the linux /
+    # windows release builds before a tag is pushed.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build linux-amd64
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+
+      - name: Build windows-amd64
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
