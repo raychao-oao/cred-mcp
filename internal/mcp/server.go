@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,34 +55,61 @@ const (
 // the same package may override it directly.
 var defaultIndex *index.Index
 
-// defaultVault is lazily initialized on first vault tool call.
-var defaultVault *vault.Client
-var defaultVaultErr error
+// AuthMode names the active unlock policy ("biometric" or "auto_unlock").
+// main sets it before Serve; ping surfaces it so users can tell whether a
+// real OS challenge guards the session. The default matches session.Default's
+// AutoUnlock fallback.
+var AuthMode = "auto_unlock"
 
-func vaultClient() (*vault.Client, error) {
-	if defaultVault != nil {
-		return defaultVault, nil
-	}
-	if defaultVaultErr != nil {
-		return nil, defaultVaultErr
-	}
+// defaultVault is lazily initialized on first vault tool call. Failures are
+// never cached permanently — the user can fix config / keychain / network and
+// retry without restarting cred-mcp (same policy as loadRegistry). A short
+// backoff prevents hammering the Vaultwarden login endpoint when a tool is
+// called in a tight loop while the vault is unreachable.
+var (
+	defaultVault      *vault.Client
+	defaultVaultErr   error
+	defaultVaultErrAt time.Time
+)
+
+// vaultRetryBackoff is how long vaultClient returns the cached error before
+// attempting a fresh connection. Var (not const) so tests can shrink it.
+var vaultRetryBackoff = 30 * time.Second
+
+// connectVault builds and authenticates a vault client. Swappable seam for
+// tests; production code must not reassign it.
+var connectVault = func() (*vault.Client, error) {
 	cfg, err := vault.DefaultConfig()
 	if err != nil {
-		defaultVaultErr = err
 		return nil, err
 	}
 	c := vault.New(cfg.BaseURL, cfg.CFClientID, cfg.CFClientSecret)
 	masterPassword, err := keychain.Get(cfg.MasterStashKey)
 	if err != nil {
-		defaultVaultErr = fmt.Errorf("master password not in keychain (stash key: %q): %w", cfg.MasterStashKey, err)
-		return nil, defaultVaultErr
+		return nil, fmt.Errorf("master password not in keychain (stash key: %q): %w", cfg.MasterStashKey, err)
 	}
 	if err := c.Login(cfg.Email, masterPassword); err != nil {
-		defaultVaultErr = fmt.Errorf("vault login failed: %w", err)
+		return nil, fmt.Errorf("vault login failed: %w", err)
+	}
+	log.Printf("vault: authenticated as %s", cfg.Email)
+	return c, nil
+}
+
+func vaultClient() (*vault.Client, error) {
+	if defaultVault != nil {
+		return defaultVault, nil
+	}
+	if defaultVaultErr != nil && time.Since(defaultVaultErrAt) < vaultRetryBackoff {
 		return nil, defaultVaultErr
 	}
+	c, err := connectVault()
+	if err != nil {
+		defaultVaultErr = err
+		defaultVaultErrAt = time.Now()
+		return nil, err
+	}
 	defaultVault = c
-	log.Printf("vault: authenticated as %s", cfg.Email)
+	defaultVaultErr = nil
 	return c, nil
 }
 
@@ -407,7 +435,7 @@ func Serve(version string) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)
 	encoder := json.NewEncoder(os.Stdout)
 	log.SetOutput(os.Stderr)
-	log.Printf("cred-mcp server started (version=%s)", version)
+	log.Printf("cred-mcp server started (version=%s, auth_mode=%s)", version, AuthMode)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -444,7 +472,9 @@ func handle(req *request, version string) response {
 	case "tools/list":
 		tools := baseTools
 		if vaultConfigured() {
-			tools = append(tools, vaultTools...)
+			// Concat (not append) so the shared baseTools backing array is
+			// never mutated, regardless of its spare capacity.
+			tools = slices.Concat(baseTools, vaultTools)
 		}
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": tools}}
 	case "tools/call":
@@ -476,9 +506,10 @@ func handleToolCall(req *request, version string) response {
 	switch p.Name {
 	case "ping":
 		return okResp(req.ID, map[string]any{
-			"ok":      true,
-			"version": version,
-			"time":    time.Now().UTC().Format(time.RFC3339),
+			"ok":        true,
+			"version":   version,
+			"time":      time.Now().UTC().Format(time.RFC3339),
+			"auth_mode": AuthMode,
 		})
 	case "copy_stash":
 		return handleCopyStash(req.ID, p.Arguments)
@@ -548,12 +579,7 @@ func handleCopyStash(id any, raw json.RawMessage) response {
 		return toolErrResp(id, "name is required")
 	}
 	ttlSeconds := args.TTLSeconds
-	if ttlSeconds <= 0 {
-		ttlSeconds = defaultCopyTTLSeconds
-	}
-	if ttlSeconds > maxCopyTTLSeconds {
-		ttlSeconds = maxCopyTTLSeconds
-	}
+	clamp(&ttlSeconds, defaultCopyTTLSeconds, maxCopyTTLSeconds)
 
 	value, err := keychain.Get(args.Name)
 	if err != nil {
@@ -872,12 +898,7 @@ func handleVaultCopy(id any, raw json.RawMessage) response {
 		return toolErrResp(id, "id is required")
 	}
 	ttlSeconds := args.TTLSeconds
-	if ttlSeconds <= 0 {
-		ttlSeconds = defaultCopyTTLSeconds
-	}
-	if ttlSeconds > maxCopyTTLSeconds {
-		ttlSeconds = maxCopyTTLSeconds
-	}
+	clamp(&ttlSeconds, defaultCopyTTLSeconds, maxCopyTTLSeconds)
 
 	var secret string
 	if err := withVault(func(vc *vault.Client) error {

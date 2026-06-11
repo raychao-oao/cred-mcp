@@ -42,12 +42,20 @@ func (s *Store) Issue(itemID, consumerID, purpose string, ttl time.Duration) (st
 	}
 	tok := hex.EncodeToString(raw)
 
+	now := time.Now()
 	s.mu.Lock()
+	// Sweep expired tokens while we hold the lock — unconsumed tokens must
+	// not accumulate for the lifetime of the process.
+	for old, e := range s.tokens {
+		if now.After(e.expiresAt) {
+			delete(s.tokens, old)
+		}
+	}
 	s.tokens[tok] = &entry{
 		itemID:     itemID,
 		consumerID: consumerID,
 		purpose:    purpose,
-		expiresAt:  time.Now().Add(ttl),
+		expiresAt:  now.Add(ttl),
 	}
 	s.mu.Unlock()
 	return tok, nil
