@@ -13,9 +13,9 @@ jobs:
     # package. (ubuntu would need xclip plus a display server.)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -29,9 +29,9 @@ jobs:
     # windows release builds before a tag is pushed.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
