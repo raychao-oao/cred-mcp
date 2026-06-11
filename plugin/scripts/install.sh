@@ -9,7 +9,7 @@ if [ -z "${CLAUDE_PLUGIN_ROOT}" ]; then
     exit 1
 fi
 
-VERSION="v0.4.5"
+VERSION="v0.5.0"
 REPO="raychao-oao/cred-mcp"
 BIN_DIR="${CLAUDE_PLUGIN_ROOT}/bin"
 BIN_PATH="${BIN_DIR}/cred-mcp"

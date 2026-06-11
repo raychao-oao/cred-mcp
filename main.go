@@ -56,19 +56,23 @@ func main() {
 	//   auto | off | none | disabled   always AutoUnlock (headless / automation)
 	//   biometric | required | hello   always biometric; fail if unavailable
 	unlockPolicy := session.AutoUnlock
+	authMode := "auto_unlock"
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CRED_MCP_UNLOCK"))) {
 	case "auto", "off", "none", "disabled":
 		// headless/automation mode — skip biometric prompt entirely
 	case "biometric", "required", "hello":
 		// force biometric regardless of environment (will fail in headless)
 		unlockPolicy = biometric.Unlock
+		authMode = "biometric"
 	default:
 		// default: use biometric when the platform supports it
 		if biometric.Available() {
 			unlockPolicy = biometric.Unlock
+			authMode = "biometric"
 		}
 	}
 	session.Default = session.New(session.DefaultIdleTTL, session.DefaultAbsoluteTTL, unlockPolicy)
+	mcp.AuthMode = authMode
 
 	mcp.Serve(version)
 }
