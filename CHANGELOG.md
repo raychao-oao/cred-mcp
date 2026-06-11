@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-06-11
+
+### Added
+- `ping` now reports `auth_mode` (`biometric` | `auto_unlock`) so users can tell whether a real OS challenge protects the session or the server fell back to auto-unlock. Also logged at startup.
+- CI test workflow (`test.yml`): `go vet` + full test suite on macOS, plus `CGO_ENABLED=0` cross-compile checks for linux/windows.
+
+### Fixed
+- Vault client initialization failures are no longer cached permanently. A failed Vaultwarden connection (network blip, server restart) is retried after a 30s backoff instead of requiring a cred-mcp restart.
+- Expired authorization tokens are now purged when new tokens are issued, preventing unbounded accumulation in long-running processes.
+
+### Changed
+- GitHub Actions bumped to `checkout@v5` / `setup-go@v6` (Node 24 requirement from 2026-06-16).
+
 ## [0.4.5] - 2026-05-25
 
 ### Fixed
