@@ -47,7 +47,7 @@ jobs:
         run: shasum -a 256 cred-mcp-* > SHA256SUMS
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # The release body is taken from the annotated tag's message by
           # default. Push tags with `git tag -a vX.Y.Z -m "..."` for nice

@@ -45,6 +45,32 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+type initializeParams struct {
+	ProtocolVersion string `json:"protocolVersion"`
+}
+
+// supportedProtocolVersions lists the MCP protocol versions this server
+// understands, newest first. latestProtocolVersion is returned when the
+// client requests a version we don't recognize (per spec: the server
+// replies with a version it supports and lets the client decide whether
+// to proceed). Bumping this set is a negotiation-behavior change, not a
+// string edit — only add a version once the corresponding capabilities
+// (if any) are actually implemented.
+var supportedProtocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
+
+const latestProtocolVersion = "2025-11-25"
+
+func negotiateProtocolVersion(raw json.RawMessage) string {
+	var p initializeParams
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
+	}
+	if slices.Contains(supportedProtocolVersions, p.ProtocolVersion) {
+		return p.ProtocolVersion
+	}
+	return latestProtocolVersion
+}
+
 // Default and ceiling values for copy_stash auto-clear TTL.
 const (
 	defaultCopyTTLSeconds = 30
@@ -465,7 +491,7 @@ func handle(req *request, version string) response {
 	switch req.Method {
 	case "initialize":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": negotiateProtocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "cred-mcp", "version": version},
 		}}
