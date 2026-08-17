@@ -118,6 +118,38 @@ func extract(t *testing.T, resp response) (isErr bool, text string, parsed map[s
 
 // ---------- save_stash ----------
 
+func TestNegotiateProtocolVersion(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+		want string
+	}{
+		{"known older version echoed back", mustMarshal(t, map[string]any{"protocolVersion": "2024-11-05"}), "2024-11-05"},
+		{"known latest version echoed back", mustMarshal(t, map[string]any{"protocolVersion": "2025-11-25"}), "2025-11-25"},
+		{"unknown version falls back to latest", mustMarshal(t, map[string]any{"protocolVersion": "2099-01-01"}), latestProtocolVersion},
+		{"missing params falls back to latest", nil, latestProtocolVersion},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := negotiateProtocolVersion(tc.raw); got != tc.want {
+				t.Fatalf("negotiateProtocolVersion(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandleInitialize_UsesNegotiatedVersion(t *testing.T) {
+	req := &request{JSONRPC: "2.0", ID: "id1", Method: "initialize", Params: mustMarshal(t, map[string]any{"protocolVersion": "2025-06-18"})}
+	resp := handle(req, "1.2.3")
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("want map result, got %T", resp.Result)
+	}
+	if got := result["protocolVersion"]; got != "2025-06-18" {
+		t.Fatalf("protocolVersion = %v, want 2025-06-18", got)
+	}
+}
+
 func TestSaveStash_RequiresName(t *testing.T) {
 	setupHandlerTest(t)
 	resp := handleSaveStash("id1", mustMarshal(t, map[string]any{"name": ""}))

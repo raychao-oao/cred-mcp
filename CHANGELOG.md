@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `initialize` no longer hardcodes `protocolVersion: "2024-11-05"` — the server now negotiates: it echoes back the client's requested version if it's one we support (`2024-11-05` through `2025-11-25`), otherwise falls back to `2025-11-25`. The old behavior froze the reported protocol version at the very first MCP spec release, two generations behind, with no automatic drift because cred-mcp implements JSON-RPC by hand (no MCP SDK to carry it forward).
+
 ## [0.5.0] - 2026-06-11
 
 ### Added
