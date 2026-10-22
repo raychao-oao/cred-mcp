@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/atotto/clipboard v0.1.4
-	github.com/raychao-oao/cred-proto v0.1.0
+	github.com/raychao-oao/cred-proto v0.1.1
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.45.0
