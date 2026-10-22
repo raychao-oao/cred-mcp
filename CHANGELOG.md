@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-10-22
+
+### Security
+- Built with Go 1.27.3 (`go` directive in go.mod raised from 1.26.1), fixing GO-2026-6809 (`crypto/x509` intermediate certificate distrust). govulncheck flagged it as reachable via `cmd/dev`.
+- `golang.org/x/crypto` v0.51.0 → v0.56.0 (plus `x/sys` v0.47.0, `x/term` v0.45.0), fixing 16 advisories. govulncheck reported none of them as called from cred-mcp code.
+
 ## [0.5.1] - 2026-08-17
 
 ### Fixed
